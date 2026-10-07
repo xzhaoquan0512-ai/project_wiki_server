@@ -71,20 +71,25 @@ jobs:
       # test/maintenance.test.mjs skips itself on win32 because it needs Linux tar, so this step
       # is the first-ever Linux coverage of that suite. LibreOffice is installed above, so point
       # the office round-trip test at it: this is the only place the variable is set.
-      # Run the test runner directly so its TAP output can be captured. The default spec reporter
-      # prints `X name` and says nothing machine-readable, so ask for TAP explicitly: it prints
-      # one `not ok <n> - <name>` line per failure. When something fails, surface those names as
-      # an error annotation, which stays readable after the run without the run logs.
+      # Run the test runner directly so its output can be captured, then report through
+      # annotations: they stay readable after the run, while the run log needs administrator
+      # rights to download. Annotations carry only a few hundred characters, so on failure send
+      # the failing test names plus the tail of the output, where the actual error usually is.
+      # The default spec reporter says nothing machine-readable, hence the explicit TAP reporter.
       - name: Test
         shell: pwsh
         run: |
           $env:PROJECT_WIKI_LIBREOFFICE_TEST = "${{ runner.os == 'Linux' && '/usr/bin/soffice' || '' }}"
-          & node --test --test-reporter=tap test/*.test.mjs 2>&1 | Tee-Object -FilePath test-output.tap
+          $version = & node --version
+          & node --test --test-reporter=tap test/*.test.mjs 2>&1 | Tee-Object -FilePath test-output.tap | Out-Null
           $code = $LASTEXITCODE
           if ($code -ne 0) {
-            $names = @(Get-Content test-output.tap | Where-Object { $_ -match '^\s*not ok \d+ - ' })
-            if ($names.Count -eq 0) { $names = @('npm test failed before reporting a test result; inspect the run log.') }
-            $names | Select-Object -First 5 | ForEach-Object { Write-Host "::error::$_" }
+            $lines = @(Get-Content test-output.tap -ErrorAction SilentlyContinue)
+            $names = @($lines | Where-Object { $_ -match '^\s*not ok \d+ - ' })
+            $summary = if ($names.Count) { 'failing tests: ' + (($names | Select-Object -First 3) -join '; ') } else { 'the runner produced no test result' }
+            $tail = ($lines | Select-Object -Last 8) -join ' / '
+            Write-Host "::error::node $version exited $code on this runner; $summary"
+            Write-Host "::error::output tail: $tail"
           }
           exit $code
 
