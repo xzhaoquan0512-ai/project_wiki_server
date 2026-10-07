@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml/badge.svg)](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml)
 
-独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **24 个工具**，工程服务提供 **8 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
+独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **25 个工具**，工程服务提供 **8 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
 
 ## 快速开始
 
@@ -27,11 +27,12 @@ node bin/project-wiki-server.mjs project
 
 这两条命令分别通过 stdio 等待 MCP 请求。客户端模板见 [Codex TOML](examples/codex.toml) 和 [通用 MCP JSON](examples/mcp.json)。执行 `npm run tools` 可通过真实 MCP 工具发现查看完整参数；该命令使用临时库，不改正式数据。`npm run panel` 另外启动本地管理面板（只读视图，见下文），不影响这两个 MCP 进程。
 
-## 知识工具：24 个
+## 知识工具：25 个
 
 | 工具 | 用途 |
 | --- | --- |
 | `wiki_read_rules` | 读取知识整理规范；另提供 `wiki://rules` 资源 |
+| `wiki_read_log` | 读取审计日志 `wiki/log.md` 的尾部（默认 200 行、上限 2000 行）；日志记录服务做过什么，不等于结果已独立验证 |
 | `wiki_read_index` | 查看当前知识目录，默认隐藏归档笔记 |
 | `wiki_search` | 检索标题、别名、标签、摘要和正文 |
 | `wiki_read_note` | 读取笔记、出处、关联、反链和当前 `revision` |
@@ -55,6 +56,10 @@ node bin/project-wiki-server.mjs project
 | `wiki_index_status` | 查看全文索引覆盖、文字稀少页和截断页 |
 | `wiki_compile_queue` | 查看按原件哈希划分的整理任务，笔记修改后回到待复核 |
 | `wiki_record_compilation` | 记录实际阅读范围、产出笔记与版本；保留审计和并发检查 |
+
+### 返回量限制与翻页
+
+长结果不会一次全部回显，也不会重复携带同一段正文：`wiki_read_index`、`wiki_read_note`、`wiki_note_history`（读单个版本时）、`wiki_lint`、`wiki_status`、`wiki_check_sources` 都接受 `offset`/`limit`（或 `max_chars`）并返回 `total*`/`next_offset`/`truncated` 供续读；`wiki_search` 也支持 `offset` 翻页（按分数排序，返回条数少于 `limit` 即到底）。`wiki_read_note` 默认 `view: content` 只回一次正文，需要带 frontmatter 的原文用 `view: raw`，两者都要用 `view: both`。`wiki_index_status.semantic_status` 反映该资料已登记的整理任务状态（`pending`/`summarized`/`needs_review`），不再固定为 `pending`；输出笔记是否仍与记录版本一致，仍由 `wiki_compile_queue` 复核。
 
 ## 从资料整理成笔记
 

@@ -407,16 +407,22 @@ export class NoteStore {
       return this.renderIndex(notes, existing);
     });
   }
-  search(query, limit = 10, include_archived = false) {
+  search(query, limit = 10, include_archived = false, offset = 0) {
+    return this.searchPage({ query, limit, offset, include_archived }).then(page => page.results);
+  }
+  // Ranked once, then sliced: callers page with offset and know whether more matches exist.
+  searchPage({ query, limit = 10, offset = 0, include_archived = false } = {}) {
     return this.locked(async () => {
       const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
       if (!terms.length) throw failure('EMPTY_QUERY', 'Search query must not be empty.');
-      return (await this.catalog()).filter(note => include_archived || !note.frontmatter.archived)
+      const ranked = (await this.catalog()).filter(note => include_archived || !note.frontmatter.archived)
         .map(note => {
           const text = [note.title, ...note.aliases, ...note.tags, note.frontmatter.summary || '', note.content].join('\n').toLowerCase();
           const score = terms.every(term => text.includes(term)) ? terms.reduce((sum, term) => sum + (note.title.toLowerCase().includes(term) ? 5 : 1), 0) : 0;
           return { relativePath: note.relativePath, title: note.title, type: note.type, tags: note.tags, score, snippet: note.content.slice(0, 300), archived: note.frontmatter.archived === true, revision: note.revision };
-        }).filter(note => note.score).sort((a, b) => b.score - a.score || a.title.localeCompare(b.title)).slice(0, limit);
+        }).filter(note => note.score).sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+      const results = ranked.slice(offset, offset + limit);
+      return { results, total: ranked.length, offset, limit, next_offset: offset + results.length < ranked.length ? offset + results.length : null };
     });
   }
   lint() {

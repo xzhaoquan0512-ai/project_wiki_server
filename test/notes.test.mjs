@@ -24,6 +24,22 @@ async function fixture(t) {
 }
 const create = (store, title, content = `# ${title}\nBody`, frontmatter) => store.write({ category: 'concepts', title, content, frontmatter });
 
+test('ranked search pages with offset and reports the full match count', async t => {
+  const { store } = await fixture(t);
+  for (const title of ['Alpha one', 'Alpha two', 'Alpha three']) await create(store, title);
+  await create(store, 'Unrelated');
+  const first = await store.searchPage({ query: 'Alpha', limit: 2 });
+  assert.equal(first.total, 3);
+  assert.equal(first.results.length, 2);
+  assert.equal(first.next_offset, 2);
+  const second = await store.searchPage({ query: 'Alpha', limit: 2, offset: 2 });
+  assert.equal(second.results.length, 1);
+  assert.equal(second.next_offset, null);
+  assert.equal(new Set([...first.results, ...second.results].map(hit => hit.title)).size, 3);
+  // The array form stays available for callers that only need one page.
+  assert.equal((await store.search('Alpha', 1)).length, 1);
+});
+
 test('existing notes require the current revision and concurrent edits cannot both win', async t => {
   const { store, root } = await fixture(t);
   const first = await create(store, 'Alpha');

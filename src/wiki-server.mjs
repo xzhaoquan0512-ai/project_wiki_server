@@ -9,7 +9,8 @@ import { safePath } from './lib/vault-io.mjs';
 import { registerSourceTools } from './lib/source-store.mjs';
 import { MAX_IMPORT_MESSAGE_BYTES } from './lib/source-limits.mjs';
 import { FulltextStore } from './lib/fulltext-store.mjs';
-import { CompilationStore } from './lib/compilation-store.mjs';
+import { CompilationStore, compilationProgress } from './lib/compilation-store.mjs';
+import { readLogTail, LOG_LINES_MAX } from './lib/vault-log.mjs';
 
 export function createWikiTransport() {
   return new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: MAX_IMPORT_MESSAGE_BYTES });
@@ -43,34 +44,82 @@ export async function createWikiServer(vaultPath) {
       catch (error) { return { isError: true, ...result({ error: error.code || 'WIKI_ERROR', message: error.message, ...(error.current_revision !== undefined ? { current_revision: error.current_revision } : {}), ...(error.relativePath ? { relativePath: error.relativePath } : {}), ...(error.transaction ? { transaction: error.transaction } : {}), ...(error.paths ? { paths: error.paths } : {}) }) }; }
     });
   };
-  register('wiki_read_index', 'Read a current catalog; archived notes are hidden by default. Reading does not rewrite the index file.', {
+  register('wiki_read_index', 'Read a current catalog; archived notes are hidden by default. Reading does not rewrite the index file. max_chars and offset bound the returned Markdown in UTF-16 code units; next_offset continues it and truncated marks a partial catalog.', {
     include_archived: z.boolean().optional(),
-  }, ({ include_archived }) => store.index(include_archived));
-  register('wiki_read_note', 'Read a note by exact path, unique title or alias, including revision, rawMarkdown, links and backlinks. Use revision for subsequent changes.', {
-    pathOrTitle: identifier,
-  }, ({ pathOrTitle }) => store.read(pathOrTitle));
+    max_chars: z.number().int().min(1000).max(50000).optional(), offset: z.number().int().min(0).max(1_000_000).optional(),
+  }, async ({ include_archived, max_chars = 12000, offset = 0 }) => {
+    const markdown = await store.index(include_archived);
+    const next = offset + max_chars < markdown.length ? offset + max_chars : null;
+    return { include_archived: include_archived === true, markdown: markdown.slice(offset, offset + max_chars), total_chars: markdown.length, offset, max_chars, next_offset: next, truncated: next !== null };
+  });
+  register('wiki_read_note', 'Read a note by exact path, unique title or alias, including revision, frontmatter, links and backlinks. The body is returned once: view content (default) is the body without frontmatter, raw is the file text with frontmatter, both returns each. max_chars and offset bound the returned text in UTF-16 code units and next_offset continues it. Use revision for subsequent changes.', {
+    pathOrTitle: identifier, view: z.enum(['content', 'raw', 'both']).optional(),
+    max_chars: z.number().int().min(1000).max(50000).optional(), offset: z.number().int().min(0).max(1_000_000).optional(),
+  }, async ({ pathOrTitle, view = 'content', max_chars = 12000, offset = 0 }) => {
+    const note = await store.read(pathOrTitle);
+    const page = text => ({ text: text.slice(offset, offset + max_chars), total: text.length, next: offset + max_chars < text.length ? offset + max_chars : null });
+    const content = page(note.content), raw = page(note.rawMarkdown);
+    const response = { ...note };
+    if (view === 'raw') delete response.content; else response.content = content.text;
+    if (view === 'content') delete response.rawMarkdown; else response.rawMarkdown = raw.text;
+    const primary = view === 'raw' ? raw : content;
+    return { ...response, pagination: {
+      view, offset, max_chars, total_chars: primary.total, next_offset: primary.next, truncated: primary.next !== null,
+      ...(view === 'both' ? { content_total_chars: content.total, raw_total_chars: raw.total } : {}),
+    } };
+  });
   register('wiki_write_note', 'Create or update a note. Existing notes require expected_revision; every change stores history, refreshes the index and appends an audit log. Register local raw sources before citing them. Reviewed requires sources, scope and review_note.', {
     category: z.enum(['entities', 'concepts', 'syntheses']), title: z.string().min(1).max(180),
     content: z.string().max(1_048_576), frontmatter, expected_revision: digest.optional(),
   }, input => store.write(input), false);
-  register('wiki_search', 'Search note titles, aliases and text. Archived notes are hidden unless requested.', {
-    query: z.string().min(1).max(4000), limit: z.number().int().min(1).max(100).optional(), include_archived: z.boolean().optional(),
-  }, ({ query, limit, include_archived }) => store.search(query, limit, include_archived));
+  register('wiki_search', 'Search note titles, aliases and text. Archived notes are hidden unless requested. Results are ranked by score; page with offset and treat fewer than limit results as the end.', {
+    query: z.string().min(1).max(4000), limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).max(1_000_000).optional(), include_archived: z.boolean().optional(),
+  }, ({ query, limit, offset, include_archived }) => store.search(query, limit, include_archived, offset));
   register('wiki_append_log', 'Append a timestamped audit entry. Note mutations already log automatically.', {
     operation: z.string().trim().min(1).max(100), title: z.string().trim().min(1).max(500), details: z.array(z.string().max(4000)).max(100).optional(),
   }, input => store.appendLog(input), false);
-  register('wiki_lint', 'Audit visible notes for ambiguous identifiers, broken wikilinks and orphan notes.', {}, () => store.lint());
-  register('wiki_status', 'Count active/archived notes and immutable raw files. Citation counts do not establish complete compilation.', {}, () => store.status());
+  register('wiki_lint', 'Audit visible notes for ambiguous identifiers, broken wikilinks and orphan notes. Issues page with offset/limit; healthy reflects every issue, not just the returned page.', {
+    offset: z.number().int().min(0).max(1_000_000).optional(), limit: z.number().int().min(1).max(500).optional(),
+  }, async ({ offset = 0, limit = 50 }) => {
+    const lint = await store.lint();
+    const issues = lint.issues.slice(offset, offset + limit);
+    return { ...lint, issues, pagination: { offset, limit, total_issues: lint.issues.length, next_offset: offset + issues.length < lint.issues.length ? offset + issues.length : null } };
+  });
+  register('wiki_status', 'Count active/archived notes and immutable raw files. Citation counts do not establish complete compilation. The unreferenced-raw list pages with offset/limit; pendingCount stays the full count.', {
+    offset: z.number().int().min(0).max(1_000_000).optional(), limit: z.number().int().min(1).max(500).optional(),
+  }, async ({ offset = 0, limit = 50 }) => {
+    const status = await store.status();
+    const pending = status.sources.pending;
+    return { ...status, sources: { ...status.sources, pending: pending.slice(offset, offset + limit),
+      pending_offset: offset, pending_limit: limit, pending_next_offset: offset + limit < pending.length ? offset + limit : null } };
+  });
   const rules = () => store.locked(async () => {
     const content = await readFile(await safePath(root, 'AGENTS.md'), 'utf8');
     if (Buffer.byteLength(content, 'utf8') > 65536) throw new Error('Rules exceed 64 KiB; provide a focused rules file before serving.');
     return content;
   });
   register('wiki_read_rules', 'Read vault organization, immutable-source and knowledge-maintenance rules before writing.', {}, rules);
+  register('wiki_read_log', 'Read the tail of the vault audit log (wiki/log.md). Every note mutation and wiki_append_log appends to it, so this is how a client sees what the service did without opening the vault. Entries record operations, not independent verification of their result.', {
+    lines: z.number().int().min(1).max(LOG_LINES_MAX).optional(),
+  }, ({ lines }) => readLogTail(root, { lines: lines ?? undefined }));
   server.registerResource('wiki_rules', 'wiki://rules', { mimeType: 'text/markdown', description: 'Knowledge organization and maintenance rules.' }, async uri => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: await rules() }] }));
-  register('wiki_note_history', 'List saved versions; pass revision to read complete historical Markdown. Deleted notes require their original exact wiki/.../*.md path. History begins at the first server-managed mutation.', {
+  register('wiki_note_history', 'List saved versions; pass revision to read one version. Deleted notes require their original exact wiki/.../*.md path. History begins at the first server-managed mutation. The version list pages with offset/limit; one revision is bounded by max_chars/offset.', {
     pathOrTitle: identifier, revision: digest.optional(),
-  }, ({ pathOrTitle, revision }) => store.history(pathOrTitle, revision));
+    offset: z.number().int().min(0).max(1_000_000).optional(), limit: z.number().int().min(1).max(200).optional(),
+    max_chars: z.number().int().min(1000).max(50000).optional(),
+  }, async ({ pathOrTitle, revision, offset = 0, limit = 20, max_chars = 12000 }) => {
+    const history = await store.history(pathOrTitle, revision);
+    if (revision) {
+      const text = history.rawMarkdown ?? '';
+      const next = offset + max_chars < text.length ? offset + max_chars : null;
+      return { ...history, rawMarkdown: text.slice(offset, offset + max_chars),
+        pagination: { offset, max_chars, total_chars: text.length, next_offset: next, truncated: next !== null } };
+    }
+    const versions = history.versions.slice(offset, offset + limit);
+    return { ...history, versions,
+      pagination: { offset, limit, total_versions: history.versions.length, next_offset: offset + versions.length < history.versions.length ? offset + versions.length : null } };
+  });
   register('wiki_restore_note', 'Restore a historical version or archived note using its current revision. For a deleted note, supply its original exact path and expected_revision:null; restoration fails if another file now exists. Sources and identifier conflicts are checked.', {
     pathOrTitle: identifier, revision: digest, expected_revision: digest.nullable(),
   }, input => store.restore(input), false);
@@ -94,9 +143,24 @@ export async function createWikiServer(vaultPath) {
   register('wiki_source_outline', 'Read source PDF bookmarks with physical page numbers. Bookmarks are untrusted navigation, not proof of chapter coverage.', {
     reference: identifier, offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(200).optional(),
   }, input => fulltext.outline(input));
-  register('wiki_index_status', 'Report fulltext indexing coverage and pages with sparse or truncated text. Indexing does not establish semantic compilation or diagram correctness.', {
+  register('wiki_index_status', 'Report fulltext indexing coverage and pages with sparse or truncated text. semantic_status reflects the compilation tasks recorded for each source instead of a fixed pending; wiki_compile_queue still re-verifies output note revisions. Indexing does not establish semantic compilation or diagram correctness.', {
     reference: identifier.optional(),
-  }, input => fulltext.status(input));
+  }, async input => {
+    const status = await fulltext.status(input);
+    const records = (await compilation.state()).records ?? {};
+    // One shared budget keeps a whole-vault status query bounded while each source still checks
+    // its own recorded output notes, so a changed note reopens the task as needs_review.
+    let budget = 500;
+    const sources = [];
+    for (const entry of status.sources) {
+      const hash = typeof entry.id === 'string' && entry.id.startsWith('source:') ? entry.id.slice(7) : null;
+      if (!hash || !/^[a-f0-9]{64}$/.test(hash)) { sources.push(entry); continue; }
+      const progress = await compilationProgress(root, records, hash, { maxNotes: Math.max(0, Math.min(200, budget)) });
+      budget -= progress.compilation_checked_notes;
+      sources.push({ ...entry, ...progress, semantic_status: progress.compilation_tasks ? progress.semantic_status : entry.semantic_status });
+    }
+    return { ...status, sources };
+  });
   register('wiki_compile_queue', 'List source-hash-bound compilation tasks in 20-page ranges. Changed output notes reopen tasks as needs_review. summarized means a caller-reported draft, not independently verified facts.', {
     status: z.enum(['pending', 'summarized', 'needs_review', 'all']).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(),
   }, input => compilation.queue(input));

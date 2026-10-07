@@ -328,8 +328,21 @@ export function registerSourceTools(server, root, beforeLockedAction, commitFile
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, invoke(input => store.readSource(input)));
   server.registerTool('wiki_check_sources', {
-    description: 'Check registered sources for deletion/hash changes and newer versions; report affected notes using sources and source_references snapshots. Does not label merely cited material fully compiled.',
-    inputSchema: {}, annotations: { readOnlyHint: true, openWorldHint: false },
-  }, invoke(() => store.checkSources()));
+    description: 'Check registered sources for deletion/hash changes and newer versions; report affected notes using sources and source_references snapshots. Sources, affected notes and references page with offset/limit while has_source_problems covers every finding. Does not label merely cited material fully compiled.',
+    inputSchema: { offset: z.number().int().min(0).max(1_000_000).optional(), limit: z.number().int().min(1).max(200).optional() },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, invoke(async ({ offset = 0, limit = 50 }) => {
+    const report = await store.checkSources();
+    const page = list => ({ entries: list.slice(offset, offset + limit), total: list.length, next_offset: offset + limit < list.length ? offset + limit : null });
+    return {
+      ...report,
+      sources: page(report.sources).entries, affected_notes: page(report.affected_notes).entries, references: page(report.references).entries,
+      pagination: {
+        offset, limit,
+        sources_total: report.sources.length, affected_notes_total: report.affected_notes.length, references_total: report.references.length,
+        sources_next_offset: page(report.sources).next_offset, affected_notes_next_offset: page(report.affected_notes).next_offset, references_next_offset: page(report.references).next_offset,
+      },
+    };
+  }));
   return store;
 }

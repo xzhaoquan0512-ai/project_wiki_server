@@ -6,6 +6,38 @@ import { readFile } from 'node:fs/promises';
 const STATE = '.wiki-server/compilation.json';
 const chunkSize = 20;
 
+/**
+ * Compilation progress for one source, derived from the caller-recorded tasks bound to its hash.
+ * Like queue(), it re-reads each recorded output note so a changed note reopens the task as
+ * needs_review; maxNotes bounds those reads because a status query must stay a bounded read.
+ */
+export async function compilationProgress(root, records, hash, { maxNotes = 200 } = {}) {
+  const ids = Object.keys(records ?? {}).filter(id => id.startsWith(`${hash}:`));
+  const statuses = ids.map(id => records[id]?.status);
+  let checked = 0, stale = 0, truncated = false;
+  for (const id of ids) {
+    for (const note of records[id]?.notes ?? []) {
+      if (checked >= maxNotes) { truncated = true; break; }
+      checked++;
+      try { if (sha256(await readFile(await safePath(root, note.path))) !== note.revision) stale++; }
+      catch { stale++; }
+    }
+    if (truncated) break;
+  }
+  const recordedReview = statuses.filter(status => status === 'needs_review').length;
+  const needsReview = recordedReview + stale;
+  return {
+    semantic_status: !ids.length ? 'pending' : needsReview ? 'needs_review' : 'summarized',
+    compilation_tasks: ids.length, compilation_summarized: statuses.filter(status => status === 'summarized').length,
+    compilation_needs_review: needsReview, compilation_stale_notes: stale, compilation_checked_notes: checked,
+    compilation_scope: !ids.length
+      ? 'no compilation task has been recorded for this source yet'
+      : truncated
+        ? `recorded progress with at most ${maxNotes} output notes re-checked; run wiki_compile_queue for the complete list`
+        : 'recorded progress with every output note re-checked; semantic correctness stays the caller assessment',
+  };
+}
+
 /** Progress is the caller's assessment, tied to immutable source and exact note revisions. */
 export class CompilationStore {
   constructor(root) { this.root = root; this.notes = new NoteStore(root); this.fulltext = new FulltextStore(root); }

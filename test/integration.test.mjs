@@ -198,6 +198,82 @@ test('project MCP discovers only scoped query tools and refuses invalid file sel
   assert.equal(ambiguous.isError, true);
 });
 
+test('knowledge reads bound their output, page with next_offset and expose the audit log', async t => {
+  const root = await fixture(t);
+  await mkdir(path.join(root, 'wiki', 'concepts'), { recursive: true });
+  await mkdir(path.join(root, 'raw'));
+  await writeFile(path.join(root, 'AGENTS.md'), '# Rules\nFixture only.\n');
+  const body = `# Long\n${'Sentence about LTDC timing.\n'.repeat(300)}`;
+  const client = await connect(t, await createWikiServer(root));
+  const call = async (name, args) => JSON.parse((await client.callTool({ name, arguments: args })).content[0].text);
+  try {
+    // Written through the service so the note has a server-managed history to page.
+    await call('wiki_write_note', { category: 'concepts', title: 'Long', content: body });
+    // The body is returned once by default, and the cursor continues it.
+    const first = await call('wiki_read_note', { pathOrTitle: 'Long', max_chars: 1000 });
+    assert.equal(first.rawMarkdown, undefined);
+    assert.equal(first.content.length, 1000);
+    assert.equal(first.pagination.truncated, true);
+    assert.ok(first.revision, 'the revision is still returned for later writes');
+    const next = await call('wiki_read_note', { pathOrTitle: 'Long', max_chars: 1000, offset: first.pagination.next_offset });
+    assert.equal(next.pagination.offset, 1000);
+    assert.notEqual(next.content, first.content);
+    const raw = await call('wiki_read_note', { pathOrTitle: 'Long', view: 'raw', max_chars: 1000 });
+    assert.equal(raw.content, undefined);
+    assert.match(raw.rawMarkdown, /^---/);
+    const both = await call('wiki_read_note', { pathOrTitle: 'Long', view: 'both', max_chars: 1000 });
+    assert.ok(both.content && both.rawMarkdown);
+    assert.ok(both.pagination.raw_total_chars > both.pagination.content_total_chars);
+
+    const index = await call('wiki_read_index', { max_chars: 1000 });
+    assert.equal(index.markdown.length, Math.min(1000, index.total_chars));
+    assert.equal(index.next_offset, index.total_chars > 1000 ? 1000 : null);
+
+    const history = await call('wiki_note_history', { pathOrTitle: 'Long', limit: 1 });
+    assert.equal(history.pagination.total_versions, 1);
+    assert.equal(history.pagination.limit, 1);
+
+    const search = await call('wiki_search', { query: 'LTDC', limit: 1 });
+    assert.equal(search.length, 1);
+    assert.deepEqual(await call('wiki_search', { query: 'LTDC', limit: 1, offset: 1 }), []);
+
+    const lint = await call('wiki_lint', { limit: 1 });
+    assert.ok(lint.pagination.total_issues >= lint.issues.length);
+    const status = await call('wiki_status', { limit: 1 });
+    assert.ok(status.sources.pending.length <= 1);
+
+    await client.callTool({ name: 'wiki_append_log', arguments: { operation: 'test', title: 'page bounds fixture' } });
+    const log = await call('wiki_read_log', { lines: 5 });
+    assert.equal(log.available, true);
+    assert.equal(log.returned <= 5, true);
+    assert.ok(log.lines.some(line => line.includes('page bounds fixture')), 'the appended entry must be readable through MCP');
+    const empty = await call('wiki_read_log', { lines: 1 });
+    assert.equal(empty.available, true);
+  } finally { await client.close(); }
+});
+
+test('index status reports recorded compilation progress instead of a fixed pending', async t => {
+  const root = await fixture(t);
+  await mkdir(path.join(root, 'wiki', 'concepts'), { recursive: true });
+  await mkdir(path.join(root, 'raw'));
+  await writeFile(path.join(root, 'AGENTS.md'), '# Rules\nFixture only.\n');
+  const client = await connect(t, await createWikiServer(root));
+  try {
+    const imported = JSON.parse((await client.callTool({ name: 'wiki_import_source', arguments: { filename: 'plain.txt', text: 'Recorded progress fixture.' } })).content[0].text);
+    const hash = imported.id.slice('source:'.length);
+    await writeFile(path.join(root, '.wiki-server', 'compilation.json'), JSON.stringify({
+      version: 1,
+      records: { [`${hash}:source-source`]: { status: 'summarized', notes: [], coverage_note: 'fixture record', recorded_at: new Date().toISOString() } },
+    }));
+    const status = JSON.parse((await client.callTool({ name: 'wiki_index_status', arguments: {} })).content[0].text);
+    const entry = status.sources.find(item => item.id === imported.id);
+    assert.equal(entry.compilation_tasks, 1);
+    assert.equal(entry.semantic_status, 'summarized');
+    assert.match(entry.compilation_scope, /recorded progress/);
+    assert.equal(entry.compilation_checked_notes, 0);
+  } finally { await client.close(); }
+});
+
 test('knowledge MCP serves rules, maintains links/index/log and preserves raw source', async t => {
   const root = await fixture(t);
   await mkdir(path.join(root, 'wiki', 'concepts'), { recursive: true });
@@ -207,7 +283,7 @@ test('knowledge MCP serves rules, maintains links/index/log and preserves raw so
   await writeFile(path.join(root, 'wiki', 'index.md'), '# Wiki Index\n');
   await writeFile(path.join(root, 'wiki', 'concepts', 'Seed.md'), '---\ntitle: Seed\ntype: concept\nsources: [raw/source.md]\n---\n# Seed\nRelated [[Child]].\n');
   const client = await connect(t, await createWikiServer(root));
-  assert.equal((await client.listTools()).tools.length, 24);
+  assert.equal((await client.listTools()).tools.length, 25);
   assert.match((await client.readResource({ uri: 'wiki://rules' })).contents[0].text, /immutable/);
   const registered = await client.callTool({ name: 'wiki_register_source', arguments: { path: 'raw/source.md' } });
   assert.notEqual(registered.isError, true);

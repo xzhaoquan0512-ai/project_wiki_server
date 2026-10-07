@@ -3,6 +3,7 @@ import { NoteStore } from './note-store.mjs';
 import { SourceStore } from './source-store.mjs';
 import { lockStatus, recoverAbandonedLock } from './vault-admin.mjs';
 import { safePath } from './vault-io.mjs';
+import { readLogTail } from './vault-log.mjs';
 import { MAX_SOURCE_MIB } from './source-limits.mjs';
 
 // Mirrors the knowledge server: the rules file is served only when it stays a focused document.
@@ -126,10 +127,11 @@ export class PanelApi {
     const archived = flag(include_archived);
     const searched = label(query, { name: 'query', max: 4000 });
     if (searched) {
-      const hits = await this.notes.search(searched, count, archived);
+      // A keyword search pages like a listing: the caller's offset is honoured and reported back.
+      const page = await this.notes.searchPage({ query: searched, limit: count, offset: start, include_archived: archived });
       return {
-        mode: 'search', query: searched, include_archived: archived, total: hits.length, offset: 0, next_offset: null,
-        entries: hits.map(hit => ({ ...noteSummary({ ...hit, frontmatter: hit }), score: hit.score, snippet: hit.snippet })),
+        mode: 'search', query: searched, include_archived: archived, total: page.total, offset: page.offset, next_offset: page.next_offset,
+        entries: page.results.map(hit => ({ ...noteSummary({ ...hit, frontmatter: hit }), score: hit.score, snippet: hit.snippet })),
       };
     }
     // A plain listing is a lock-free read of the note files; it does not need a transaction view.
@@ -174,12 +176,7 @@ export class PanelApi {
 
   async activity({ lines } = {}) {
     const count = integer(lines, { name: 'lines', fallback: LOG_DEFAULT_LINES, min: 1, max: LOG_MAX_LINES });
-    const content = await readVaultText(this.root, 'wiki/log.md');
-    if (content === null) return { available: false, total_lines: 0, returned: 0, lines: [] };
-    const all = content.replace(/\r\n/g, '\n').split('\n');
-    if (all.length > 1 && all.at(-1) === '') all.pop();
-    const tail = all.slice(Math.max(0, all.length - count));
-    return { available: true, total_lines: all.length, returned: tail.length, lines: tail };
+    return readLogTail(this.root, { lines: count });
   }
 
   async rebuildIndex({ confirm } = {}) {

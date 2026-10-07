@@ -6,7 +6,7 @@ import path from 'node:path';
 import { initializeVault } from '../src/vault.mjs';
 import { SourceStore } from '../src/lib/source-store.mjs';
 import { FulltextStore } from '../src/lib/fulltext-store.mjs';
-import { CompilationStore } from '../src/lib/compilation-store.mjs';
+import { CompilationStore, compilationProgress } from '../src/lib/compilation-store.mjs';
 import { NoteStore } from '../src/lib/note-store.mjs';
 
 function pdf() {
@@ -36,9 +36,22 @@ test('PDF fulltext uses page hashes, excludes changed originals, tracks draft co
   const input = { task_id: task.id, status: 'summarized', notes: [note.relativePath], coverage_note: 'Read all of PDF page 1; fixture text only, no diagram or hardware claims.', expected_revision: null };
   await progress.record(input);
   assert.equal((await progress.queue({ status: 'all' })).counts.summarized, 1);
+  // Index status reports what was actually recorded for this source instead of a fixed pending.
+  const hash = source.id.slice('source:'.length);
+  const recorded = await compilationProgress(root, (await progress.state()).records, hash);
+  assert.equal(recorded.semantic_status, 'summarized');
+  assert.equal(recorded.compilation_tasks, 1);
+  assert.equal(recorded.compilation_summarized, 1);
+  assert.equal(recorded.compilation_checked_notes, 1);
+  assert.equal((await compilationProgress(root, {}, hash)).semantic_status, 'pending');
+  assert.equal((await compilationProgress(root, {}, hash)).compilation_tasks, 0);
   await assert.rejects(progress.record(input), /changed/);
   await notes.write({ category: 'concepts', title: 'DMA evidence', content: 'Changed assessment requiring recheck.', expected_revision: note.revision });
   assert.equal((await progress.queue({ status: 'all' })).counts.needs_review, 1);
+  // A changed output note reopens the task, so the status query must not keep reporting summarized.
+  const stale = await compilationProgress(root, (await progress.state()).records, hash);
+  assert.equal(stale.semantic_status, 'needs_review');
+  assert.equal(stale.compilation_stale_notes, 1);
   assert.match(await readFile(path.join(root, 'wiki/log.md'), 'utf8'), /record-compilation/);
   await writeFile(path.join(root, source.path), 'changed original');
   assert.equal((await full.search({ query: 'DMA' })).total, 0);

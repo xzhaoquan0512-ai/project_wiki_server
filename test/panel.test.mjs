@@ -114,6 +114,14 @@ test('note listing, search, reading and history reuse the knowledge store', asyn
   const search = await call(`/api/notes?query=${encodeURIComponent('面板测试')}`);
   assert.equal(search.body.data.mode, 'search');
   assert.equal(search.body.data.entries.length, 1);
+  // A keyword search honours the requested offset and reports how to continue, like a listing.
+  assert.equal(search.body.data.offset, 0);
+  assert.equal(search.body.data.total, 1);
+  const offsetSearch = await call(`/api/notes?query=${encodeURIComponent('面板测试')}&offset=1&limit=1`);
+  assert.equal(offsetSearch.body.data.mode, 'search');
+  assert.equal(offsetSearch.body.data.offset, 1);
+  assert.equal(offsetSearch.body.data.entries.length, 0);
+  assert.equal(offsetSearch.body.data.next_offset, null);
 
   const read = await call(note('面板测试概念'));
   assert.equal(read.status, 200);
