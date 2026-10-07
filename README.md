@@ -261,6 +261,8 @@ Windows 路径可写为 `D:/Code/my-project`。`adapter` 有三个选项：
 
 该适配器与本服务之间的接口有回归测试覆盖：`test/context-session.test.mjs` 会生成一个最小的 Python 后端（实现同样的子命令与参数），并断言适配器实际发出的 `--session/--max-chars/--profile/--budget/--reason/--kind/--query/--path/--section/--pointer/--start-line/--command-index/--stream/--argv-file` 等参数、JSON 契约、同一 session 的串行化，以及"非 JSON 输出""非零退出但带回执""无输出"三类失败路径。测试不依赖任何具体工程的 `context_session.py`，只要求本机有 Python；缺少 Python 时按用例粒度跳过并给出原因。适配器本身不校验也不探测后端版本，接口不一致会在调用时以明确错误暴露。
 
+除 fixture 用例外，还有一条默认跳过的真实工程端到端用例 `test/real-project.test.mjs`：`PROJECT_WIKI_REAL_PROJECT` 指向本机一个自带 `tools/docs/context_session.py` 的工程绝对路径，`PROJECT_WIKI_REAL_QUERY`／`PROJECT_WIKI_REAL_PATH`／`PROJECT_WIKI_REAL_EVIDENCE` 提供该工程里确实存在的检索词、文档与 RUN/EVD 记录，`PROJECT_WIKI_REAL_PYTHON` 可指定后端解释器，`PROJECT_WIKI_REAL_GIT_TIMEOUT`（默认 30 秒）给出本次 Git 查询允许的等待时间，因为挂载盘或大工程可能超过默认 20 秒。它只断言本服务负责的部分：会话往返、固定 argv、等待时间与预算调整、路径与选择器的拒绝，以及每次调用后工程内不留下请求文件。未配置、路径不存在、缺少后端脚本或没有可用解释器时按用例粒度跳过并给出原因，仓库内不保存任何工程路径、资料正文、会话或证据内容。Windows 与 WSL 各跑一遍同一条用例，即可覆盖两个平台的默认解释器与路径行为。
+
 通用会话保存在服务的 `data/project-sessions/`，可用 `PROJECT_WIKI_STATE` 指向其他绝对目录，必须位于所有登记工程之外；若查询本服务源码本身，也要把会话目录设到外部。通用会话计入整个返回 JSON 的 UTF-16 字符数，传输协议开销另算；原后端保留其预算口径。两个口径都不代表模型实际 token 用量。
 
 工程接口不提供源码编辑、任意命令、构建或烧录。普通目录即使不是 Git 仓库，也能检索和读取文件；Git 状态会明确报告不可用。读取历史测试报告不会重新运行测试，各次文件读取也不是整个工程的一致快照。
