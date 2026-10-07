@@ -58,3 +58,23 @@ test('PDF fulltext uses page hashes, excludes changed originals, tracks draft co
   assert.equal((await full.status()).sources[0].indexed, false);
   assert.equal((await progress.queue()).total_tasks, 0);
 });
+
+test('the index report states the unit count, so a text source is not reported as zero pages', async t => {
+  const parent = await realpath(os.tmpdir()); const temp = await mkdtemp(path.join(parent, 'wiki-indexreport-'));
+  t.after(async () => { const p = await realpath(temp); assert.equal(path.dirname(p), parent); assert.ok(path.basename(p).startsWith('wiki-indexreport-')); await rm(p, { recursive: true }); });
+  const root = await initializeVault(path.join(temp, 'vault'));
+  const sources = new SourceStore(root);
+  await sources.importSource({ filename: 'plain.txt', text: 'ReportShapeToken body.\n'.repeat(600) });
+  await sources.importSource({ filename: 'page.pdf', base64: pdf().toString('base64') });
+  const report = await new FulltextStore(root).index();
+  const text = report.results.find(entry => entry.path.endsWith('plain.txt'));
+  const paged = report.results.find(entry => entry.path.endsWith('page.pdf'));
+  // A unit-based source has no pages; without the unit count the report looked like "nothing indexed".
+  assert.equal(text.status, 'indexed');
+  assert.ok(text.units > 1, `a text source must report its units, got ${JSON.stringify(text)}`);
+  assert.equal(paged.units, 1);
+  assert.equal(paged.pages, 1);
+  const unchanged = (await new FulltextStore(root).index()).results.find(entry => entry.path.endsWith('plain.txt'));
+  assert.equal(unchanged.status, 'unchanged');
+  assert.equal(unchanged.units, text.units);
+});

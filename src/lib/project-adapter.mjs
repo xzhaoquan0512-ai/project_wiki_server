@@ -45,6 +45,25 @@ function option(args, flag, value) {
   if (value !== undefined) args.push(`--${flag}=${String(value)}`);
 }
 
+// `rg --json` prints begin/end/summary records even when nothing matched, so a complete capture
+// with exit code 1 and a non-empty stdout can still mean "no matches". Anything else - a parse
+// error, a real message on the stream, an unreadable capture - stays a failure.
+async function rgFoundNoMatches(root, result) {
+  if (result.stdout?.bytes === 0) return true;
+  if (typeof result.manifest_path !== 'string' || !result.manifest_path) return false;
+  const stdoutRelative = path.posix.join(path.posix.dirname(result.manifest_path), 'stdout.txt');
+  let text;
+  try { text = await readFile(await containedPath(root, stdoutRelative), 'utf8'); }
+  catch { return false; }
+  if (text.length > 1_048_576) return false;
+  const lines = text.split('\n').filter(line => line.trim());
+  if (!lines.length) return true;
+  return lines.every(line => {
+    try { const record = JSON.parse(line); return ['begin', 'end', 'summary'].includes(record?.type); }
+    catch { return false; }
+  });
+}
+
 export class ProjectAdapter {
   #queues = new Map();
   constructor(projects, runner = execute, options = {}) {
@@ -237,7 +256,7 @@ export class ProjectAdapter {
       let data;
       try { data = JSON.parse(stdout); }
       catch { throw new Error('Project backend did not return a complete JSON response.'); }
-      if(observation && data.result?.exit_code===1 && data.result?.complete && data.result?.stdout?.bytes===0) {data.status='passed';data.result.no_matches=true;data.result.command_exit_code=1;exitCode=0;}
+      if(observation && data.result?.exit_code===1 && data.result?.complete && await rgFoundNoMatches(project.root, data.result)) {data.status='passed';data.result.no_matches=true;data.result.command_exit_code=1;exitCode=0;}
       return {
         project_id: project.id, observed_at: new Date().toISOString(), exit_code: exitCode,
         backend: data, ...(stderr.trim() ? { diagnostic: stderr.trim().slice(0, 1200) } : {}),

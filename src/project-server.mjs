@@ -76,7 +76,7 @@ export function createProjectServer(projects, options = {}) {
   register('project_files', 'Find permitted source/config/document paths in the whitelist project. Excludes credentials, links and build/dependency directories. Generic uses offset/limit; context_session returns a bounded capture to continue with project_read, and refuses offset/limit.', {
     ...session, query:z.string().max(1000).optional(), path_prefix:z.string().max(2048).optional(), ...paging, ...limit,
   },'files');
-  register('project_search_code', 'Case-insensitive literal source/config/document search with line numbers. Generic provides hashes and offset/limit; context_session returns an accounted rg capture to continue with project_read. Fixed read-only scan captured by context_session; no caller-supplied executable or regex.', {
+  register('project_search_code', 'Case-insensitive literal source/config/document search with line numbers. Generic provides hashes and offset/limit; context_session returns an accounted rg capture to continue with project_read. Fixed read-only scan captured by context_session; no caller-supplied executable or regex. A search that matches nothing returns no_matches with the command exit code instead of a tool failure, so an empty result is never mistaken for an error.', {
     ...session, query:z.string().min(1).max(1000), path_prefix:z.string().max(2048).optional(), ...paging, ...limit,
   },'search-code');
   register('project_capture_evidence', 'Capture full SHA-256 file identities plus commit, dirty state and time. Result is unverified evidence, not build or hardware acceptance. Context adapter stores the JSON in its accounted capture; generic returns a JSON text snapshot.', {

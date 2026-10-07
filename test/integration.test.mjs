@@ -413,6 +413,46 @@ test('one read-only operations view answers while a writer holds the vault lock'
   } finally { await client.close(); }
 });
 
+test('a zero-match rg capture is a no_matches result while real rg errors still fail', async t => {
+  const root = await fixture(t);
+  const projectRoot = path.join(root, 'project');
+  await mkdir(path.join(projectRoot, 'tools/docs'), { recursive: true });
+  const captureDir = path.join(projectRoot, 'build/docs/context-output/CTX-1/CAP-1');
+  await mkdir(captureDir, { recursive: true });
+  const manifest = 'build/docs/context-output/CTX-1/CAP-1/capture.json';
+  // What `rg --json` really writes when nothing matches: metadata records, no "match" record.
+  const rgNoMatch = [
+    '{"type":"begin","data":{"path":{"text":"tools/docs/notes.md"}}}',
+    '{"type":"end","data":{"path":{"text":"tools/docs/notes.md"},"stats":{"bytes_printed":0,"matches":0,"matched_lines":0}}}',
+    '{"data":{"elapsed_total":{"human":"0.006476s","secs":0},"stats":{"bytes_printed":0,"matches":0,"matched_lines":0}},"type":"summary"}',
+  ].join('\n');
+  let stdoutText = rgNoMatch;
+  const runner = async (executable, args) => {
+    await readFile(path.join(projectRoot, args.find(value => value.startsWith('--argv-file=')).slice('--argv-file='.length)), 'utf8');
+    await writeFile(path.join(captureDir, 'stdout.txt'), stdoutText);
+    const envelope = { status: 'failed', operation: 'run', session: 'CTX-1', result: {
+      capture_id: 'CAP-1', exit_code: 1, capture_status: 'complete', complete: true, manifest_path: manifest,
+      stdout: { sha256: 'a'.repeat(64), bytes: Buffer.byteLength(stdoutText), encoding: 'utf-8' }, stderr: { sha256: 'e'.repeat(64), bytes: 0, encoding: 'utf-8' },
+    } };
+    throw Object.assign(new Error('rg exited 1'), { stdout: JSON.stringify(envelope), stderr: '', code: 1 });
+  };
+  const client = await connect(t, createProjectServer(new Map([['demo', { id: 'demo', root: projectRoot, adapter: 'context_session', script: 'backend.py', python: 'python' }]]), { runner }));
+  const scope = { project_id: 'demo', session_id: 'CTX-1' };
+
+  const noMatch = await client.callTool({ name: 'project_search_code', arguments: { ...scope, query: 'absent-token' } });
+  const body = JSON.parse(noMatch.content[0].text);
+  assert.notEqual(noMatch.isError, true, 'a zero-match search must not be an error');
+  assert.equal(body.backend.status, 'passed');
+  assert.equal(body.backend.result.no_matches, true);
+  assert.equal(body.backend.result.command_exit_code, 1, 'the original rg exit code stays visible');
+
+  // A capture that really printed an error keeps failing: the fix must not swallow real errors.
+  stdoutText = 'rg: unrecognized flag --nope\n';
+  const failure = await client.callTool({ name: 'project_search_code', arguments: { ...scope, query: 'absent-token' } });
+  assert.equal(failure.isError, true);
+  assert.notEqual(JSON.parse(failure.content[0].text).backend.status, 'passed');
+});
+
 test('knowledge MCP serves rules, maintains links/index/log and preserves raw source', async t => {
   const root = await fixture(t);
   await mkdir(path.join(root, 'wiki', 'concepts'), { recursive: true });

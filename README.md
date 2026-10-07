@@ -255,7 +255,7 @@ ssh -N -L 8790:127.0.0.1:8790 <user>@<host>
 
 源码检索的覆盖范围由适配器说明，不从服务层猜测：`generic` 做大小写不敏感的字面检索（覆盖允许的源码与文档、`wiki/` 与 `docs/wiki/`），已知路径的源码用 `project_read`；`context_session` 的 `kind` 只有 `docs`/`wiki` 两种，实际覆盖取决于目标工程自己的文档索引。服务只转发后端 CLI 真正接受的参数——例如后端内部声明但 CLI 未定义 flag 的 `record_type` 不会被透传，以免真实调用因未知参数直接失败。
 
-`project_files` / `project_search_code` 提供独立于文档索引的入口。`context_session` 通过后端 `run` 执行服务固定的 `rg` 参数（本机需安装 ripgrep），不接受任意命令；结果存入后端捕获，用 `project_read` 跟随行/列续读。无匹配是正常空结果，原始退出码仍保留。`generic` 使用自身受限文件遍历，支持 `offset/limit`；它是每次重新扫描，文件变化可能使分页移动。隐藏目录、依赖/构建目录及明显凭据文件不参与搜索。`context_session` 不接受这两个新接口的 `offset/limit`，避免静默忽略分页参数。
+`project_files` / `project_search_code` 提供独立于文档索引的入口。`context_session` 通过后端 `run` 执行服务固定的 `rg` 参数（本机需安装 ripgrep），不接受任意命令；结果存入后端捕获，用 `project_read` 跟随行/列续读。无匹配是正常空结果：返回 `no_matches: true` 并保留原始退出码 `command_exit_code`（`rg` 以 1 表示没有命中），不当作工具失败；判定依据是捕获流里有没有命中记录，而不是字节数——`rg --json` 即使零命中也会写出 begin/end/summary 统计行，只有真正报错的输出才继续按失败返回。`generic` 使用自身受限文件遍历，支持 `offset/limit`；它是每次重新扫描，文件变化可能使分页移动。隐藏目录、依赖/构建目录及明显凭据文件不参与搜索。`context_session` 不接受这两个新接口的 `offset/limit`，避免静默忽略分页参数。
 
 工程证据包的 `files[].sha256` 是 64 位完整摘要；`context_session` 同时保留后端原生的 8 位指纹和读取回执。后端预算记录后端输出，完整哈希元数据另计 MCP 输出量。一次证据采集/复核最多执行 130 秒，客户端请求超时需保留收尾时间（模板为 180 秒）。可将包保存到笔记 `frontmatter.provenance[].evidence`，并提供一致的 `project_id` 和明确的 `scope`。已有短指纹须使用 `hash: {algorithm: "sha256-prefix", value: "12345678"}`，不能补零冒充完整 SHA-256。
 

@@ -25,8 +25,8 @@ export class FulltextStore {
    await withVaultLock(this.root,async()=>{
     if(sha256(await fs.readFile(await safePath(this.root,source.path)))!==source.sha256)throw Error('Source changed while indexing; new generation not published');
     const latest=await this.catalog();latest.entries=latest.entries.filter(e=>e.source_hash!==source.sha256);latest.entries.push(created);await writeJson(this.root,CURRENT,latest);
-   });results.push({path:source.path,status:'indexed',pages:m.page_count,needs_visual:m.units.filter(u=>u.needs_visual).length});
-   process.stderr.write(`Indexed ${source.path}: ${m.page_count} pages\n`);
+   });results.push({path:source.path,status:'indexed',pages:m.page_count,units:m.unit_count,kind:m.kind,needs_visual:m.units.filter(u=>u.needs_visual).length});
+   process.stderr.write(`Indexed ${source.path}: ${m.unit_count ?? m.page_count} units\n`);
  }return {results,meaning:'All pages traversed does not mean all content semantically reviewed.'};
  }
  async verifyUnits(item,manifest){for(const unit of manifest.units){const data=await fs.readFile(await safePath(this.root,`.wiki-server/fulltext/${item.source_hash}/${item.generation}/${unit.unit??unit.page}.json`));if(sha256(data)!==unit.sha256)throw Error(`Fulltext cache integrity mismatch: ${item.source_path} page ${unit.page}`);}}
