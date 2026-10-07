@@ -4,12 +4,22 @@ import { deflateRawSync } from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import XLSX from 'xlsx';
 import { extractOffice } from '../src/lib/extractors/office.mjs';
 import { MAX_SOURCE_BYTES, MAX_SOURCE_MIB } from '../src/lib/source-limits.mjs';
+
+// An opt-in converter path, but only when it is an absolute path that really exists.
+// path.isAbsolute() alone is not enough: on Windows it accepts '/usr/bin/soffice', a
+// POSIX path that is absolute by its rules while naming no executable on that host. A
+// preset-but-missing converter must skip this opt-in test rather than fail it.
+function configuredConverter() {
+  const candidate = process.env.PROJECT_WIKI_LIBREOFFICE_TEST;
+  return candidate && path.isAbsolute(candidate) && existsSync(candidate) ? candidate : undefined;
+}
 
 function crc32(buffer) {
   let crc = 0xffffffff;
@@ -220,8 +230,8 @@ test('Legacy DOC/PPT require explicitly configured converter and valid original 
   await assert.rejects(extractOffice(Buffer.alloc(MAX_SOURCE_BYTES + 1), { kind: 'docx' }), new RegExp(`${MAX_SOURCE_MIB} MiB`));
 });
 
-test('LibreOffice round-trips real DOC and PPT with Chinese text', { skip: !process.env.PROJECT_WIKI_LIBREOFFICE_TEST }, async () => {
-  const command = process.env.PROJECT_WIKI_LIBREOFFICE_TEST;
+test('LibreOffice round-trips real DOC and PPT with Chinese text', { skip: configuredConverter() ? false : 'set PROJECT_WIKI_LIBREOFFICE_TEST to an existing absolute soffice executable path to run this' }, async () => {
+  const command = configuredConverter();
   assert.equal(path.isAbsolute(command), true);
   const tempParent = await realpath(os.tmpdir());
   const temporary = await mkdtemp(path.join(tempParent, 'project-wiki-office-test-'));
@@ -249,5 +259,19 @@ test('LibreOffice round-trips real DOC and PPT with Chinese text', { skip: !proc
     assert.equal(path.dirname(resolved), tempParent);
     assert.ok(path.basename(resolved).startsWith('project-wiki-office-test-'));
     await rm(resolved, { recursive: true, force: true });
+  }
+});
+
+// Guards the CI regression where PROJECT_WIKI_LIBREOFFICE_TEST was pointed at the Linux path
+// '/usr/bin/soffice' on a Windows runner: path.isAbsolute() accepts it, so the opt-in test
+// above stopped skipping and failed on exec instead. The converter must be required to exist.
+test('a preset LibreOffice path that does not exist is not treated as a usable converter', async () => {
+  const previous = process.env.PROJECT_WIKI_LIBREOFFICE_TEST;
+  process.env.PROJECT_WIKI_LIBREOFFICE_TEST = path.join(os.tmpdir(), 'project-wiki-absent-soffice-does-not-exist');
+  try {
+    assert.equal(configuredConverter(), undefined);
+  } finally {
+    if (previous === undefined) delete process.env.PROJECT_WIKI_LIBREOFFICE_TEST;
+    else process.env.PROJECT_WIKI_LIBREOFFICE_TEST = previous;
   }
 });

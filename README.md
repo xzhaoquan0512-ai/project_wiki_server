@@ -314,7 +314,7 @@ bash /path/to/service/deploy/ssh/start-wiki.sh
 
 若安装位置不同，请调整路径。Windows 对应设置 `PROJECT_WIKI_LIBREOFFICE` 为例如 `C:/Program Files/LibreOffice/program/soffice.com`；不要把整条命令或参数填入环境变量。**Windows 必须用 `soffice.com` 而不是 `soffice.exe`**：后者是 GUI 存根，`--headless --version` 不会返回，doctor 只会报告超时。进程继承该变量，客户端模板中有可选配置位置。包名可查 [Ubuntu LibreOffice 包说明](https://packages.ubuntu.com/noble/libreoffice)；OCR 本地资源机制见 [Tesseract.js 官方说明](https://github.com/naptha/tesseract.js/blob/master/docs/local-installation.md)。
 
-本开发目录另外保留了一份 Windows 用的离线运行时：`dist/runtime/` 内的 MSI、管理员解压结果和 `prepare-libreoffice.ps1`。它被 `.gitignore` 排除、不进入部署包，且 `prepare-libreoffice.ps1` 依赖的分片文件在拼出 MSI 后已移除，因此**不能重跑**；换机器时需按上面的 apt/安装包方式重新准备。该运行时本身可用：`soffice.com` 报 LibreOffice 26.8.0，`test/office.test.mjs` 的中文 DOC/PPT 往返用例在把 `PROJECT_WIKI_LIBREOFFICE_TEST` 指向它时会真实通过（约 80 秒），默认跳过。
+本开发目录另外保留了一份 Windows 用的离线运行时：`dist/runtime/` 内的 MSI、管理员解压结果和 `prepare-libreoffice.ps1`。它被 `.gitignore` 排除、不进入部署包，且 `prepare-libreoffice.ps1` 依赖的分片文件在拼出 MSI 后已移除，因此**不能重跑**；换机器时需按上面的 apt/安装包方式重新准备。该运行时本身可用：`soffice.com` 报 LibreOffice 26.8.0，`test/office.test.mjs` 的中文 DOC/PPT 往返用例在把 `PROJECT_WIKI_LIBREOFFICE_TEST` 指向它时会真实通过（本机实测约 93 秒）。该变量必须指向**真实存在的绝对路径**才会启用这条用例：只写一个绝对但不存在的位置（例如在 Windows 上填 POSIX 的 `/usr/bin/soffice`）会被判定为未配置并跳过，而不是报错失败；默认同样跳过。
 
 LibreOffice 转换为每次请求创建独立用户配置和临时目录，关闭宏、活动内容及文档链接更新并设置超时；这不是操作系统网络沙箱。处理不可信旧格式时，如需保证转换进程不能联网，应在服务器容器或系统网络策略中隔离。原生 DOCX/XLSX/PPTX/XLS 解析不调用 LibreOffice，不执行公式或宏，也不跟随外链。
 

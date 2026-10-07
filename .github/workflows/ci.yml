@@ -53,7 +53,7 @@ jobs:
         run: npm run init:vault
 
       # Ubuntu only: LibreOffice is what turns the legacy .doc/.ppt extractor path into real
-      # coverage. Without it the ~75s LibreOffice round-trip test in test/office.test.mjs skips.
+      # coverage. Without it the LibreOffice round-trip test in test/office.test.mjs skips.
       # fonts-noto-cjk is required because that test round-trips Chinese text.
       - name: Install LibreOffice (Ubuntu)
         if: runner.os == 'Linux'
@@ -74,11 +74,12 @@ jobs:
       - name: Test
         run: npm test
         env:
-          # Ubuntu installs LibreOffice above, so the ~75s legacy .doc/.ppt round-trip test in
-          # test/office.test.mjs runs instead of skipping. Windows has no LibreOffice in this
-          # workflow, where the same variable points at a path that does not exist and the test
-          # skips exactly as it does locally.
-          PROJECT_WIKI_LIBREOFFICE_TEST: /usr/bin/soffice
+          # Ubuntu installs LibreOffice above, so the legacy .doc/.ppt round-trip test in
+          # test/office.test.mjs runs instead of skipping. The variable must stay empty on
+          # Windows: '/usr/bin/soffice' is an absolute path to path.isAbsolute() there too, so a
+          # non-empty value selects the test and then fails to exec. Existence is checked by the
+          # test as well, but an empty value is the honest way to say "no converter here".
+          PROJECT_WIKI_LIBREOFFICE_TEST: ${{ runner.os == 'Linux' && '/usr/bin/soffice' || '' }}
 
       # Documented post-change check alongside `npm test`; exercises both MCP services over
       # local stdio against the freshly initialized default vault and empty project registry.
