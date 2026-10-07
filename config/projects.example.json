@@ -1,0 +1,17 @@
+{
+  "projects": [
+    {
+      "id": "my-project",
+      "root": "/absolute/path/to/your/project",
+      "adapter": "auto",
+      "description": "普通目录或 Git 工程；auto 有 context_session.py 则使用原后端，否则使用通用只读适配器"
+    },
+    {
+      "id": "specialized-project",
+      "root": "/absolute/path/to/project-with-context-session",
+      "adapter": "context_session",
+      "python": "python3",
+      "description": "可选：显式要求 tools/docs/context_session.py；不要保留不存在的示例工程"
+    }
+  ]
+}

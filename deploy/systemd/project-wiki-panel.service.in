@@ -1,0 +1,51 @@
+# Template for the knowledge admin panel as a persistent systemd service.
+#
+# Replace the placeholders below before installing; nothing here is specific to one host:
+#   __SERVICE_ROOT__  absolute path of the unpacked service directory
+#   __VAULT__         absolute path of the vault that the panel serves
+#   __NODE__          absolute path of the node executable (`command -v node`)
+#   __USER__          the account that owns the service directory and the vault
+#
+#   sed -e 's|__SERVICE_ROOT__|/home/ubuntu/project-wiki-server|g' \
+#       -e 's|__VAULT__|/home/ubuntu/project-wiki-server/data/vault|g' \
+#       -e 's|__NODE__|/usr/bin/node|g' -e 's|__USER__|ubuntu|g' \
+#       project-wiki-panel.service.in | sudo tee /etc/systemd/system/project-wiki-panel.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now project-wiki-panel
+#
+# The panel binds to the loopback address only. Reach it from a workstation with:
+#   ssh -N -L 8790:127.0.0.1:8790 <user>@<host>      then open http://127.0.0.1:8790/
+[Unit]
+Description=Project Wiki knowledge admin panel (loopback only, no authentication)
+Documentation=file:__SERVICE_ROOT__/README.md
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__SERVICE_ROOT__
+Environment=PROJECT_WIKI_NODE=__NODE__
+Environment=PROJECT_WIKI_VAULT=__VAULT__
+Environment=PROJECT_WIKI_PANEL_HOST=127.0.0.1
+Environment=PROJECT_WIKI_PANEL_PORT=8790
+ExecStart=__SERVICE_ROOT__/deploy/ssh/start-panel.sh
+Restart=on-failure
+RestartSec=3
+
+# The panel is a reader that performs two confirmed maintenance writes inside the vault, so the
+# vault stays writable while the rest of the host is read-only to the service.
+ProtectSystem=strict
+ReadWritePaths=__VAULT__
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+# No MemoryDenyWriteExecute: the V8 engine needs writable and executable memory for JIT.
+
+[Install]
+WantedBy=multi-user.target

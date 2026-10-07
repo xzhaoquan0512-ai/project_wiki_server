@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Project Wiki backup at 03:15 China time
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 Asia/Shanghai
+Persistent=true
+Unit=project-wiki-backup.service
+
+[Install]
+WantedBy=timers.target

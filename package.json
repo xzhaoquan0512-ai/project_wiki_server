@@ -1,0 +1,42 @@
+{
+  "name": "project-wiki-server",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Independent knowledge and engineering-context MCP services with separate data and project registration.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "project-wiki-server": "bin/project-wiki-server.mjs"
+  },
+  "scripts": {
+    "init:vault": "node bin/project-wiki-server.mjs init-vault",
+    "start:wiki": "node bin/project-wiki-server.mjs wiki",
+    "start:project": "node bin/project-wiki-server.mjs project",
+    "panel": "node bin/project-wiki-server.mjs panel",
+    "test": "node --test test/*.test.mjs",
+    "smoke": "node test/smoke.mjs",
+    "tools": "node bin/list-tools.mjs",
+    "bundle": "node bin/build-bundle.mjs",
+    "doctor": "node bin/check-extractors.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@napi-rs/canvas": "0.1.100",
+    "@tesseract.js-data/chi_sim": "1.0.0",
+    "@tesseract.js-data/eng": "1.0.0",
+    "fast-xml-parser": "5.11.2",
+    "iconv-lite": "0.7.3",
+    "image-size": "2.0.4",
+    "parse5": "8.0.1",
+    "pdfjs-dist": "4.10.38",
+    "saxes": "6.0.0",
+    "tesseract.js": "7.0.0",
+    "utif": "3.1.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "yaml": "2.9.1",
+    "yauzl": "3.4.0",
+    "zod": "4.6.5"
+  }
+}

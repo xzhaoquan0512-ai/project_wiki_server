@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Project Wiki source changes every 15 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=30
+Unit=project-wiki-scan.service
+
+[Install]
+WantedBy=timers.target

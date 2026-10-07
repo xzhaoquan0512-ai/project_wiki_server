@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "knowledge": {
+      "command": "node",
+      "args": ["/absolute/path/project_wiki_server/bin/project-wiki-server.mjs", "wiki"],
+      "env": {
+        "PROJECT_WIKI_VAULT": "/absolute/path/to/vault",
+        "PROJECT_WIKI_LIBREOFFICE": "/usr/bin/soffice"
+      }
+    },
+    "project": {
+      "command": "node",
+      "args": ["/absolute/path/project_wiki_server/bin/project-wiki-server.mjs", "project"],
+      "env": {
+        "PROJECT_WIKI_CONFIG": "/absolute/path/project_wiki_server/config/projects.json",
+        "PROJECT_WIKI_STATE": "/absolute/path/to/project-sessions"
+      }
+    }
+  }
+}

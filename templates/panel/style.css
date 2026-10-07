@@ -1,0 +1,163 @@
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #d9dde3;
+  --text: #1d2128;
+  --muted: #6b7280;
+  --accent: #1f5fa8;
+  --accent-soft: #eaf1fa;
+  --ok: #1c6b3f;
+  --warn: #8a5a00;
+  --danger: #a3241f;
+  --code-bg: #14181f;
+  --code-text: #e6e9ef;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.55 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.top h1 { margin: 0; font-size: 18px; }
+.top-title p { margin: 4px 0 0; }
+
+h2 { margin: 0; font-size: 15px; }
+h3 { margin: 18px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+.badges { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.badge.ok { background: #e8f5ed; color: var(--ok); border-color: #bfe0cb; }
+.badge.warn { background: #fdf3e0; color: var(--warn); border-color: #ecd6a8; }
+.badge.danger { background: #fdeceb; color: var(--danger); border-color: #efc3c0; }
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 10px 24px 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: none;
+  color: var(--muted);
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab:hover { background: var(--accent-soft); color: var(--accent); }
+.tab.active { background: var(--bg); border-color: var(--border); color: var(--text); font-weight: 600; }
+
+main { padding: 18px 24px 48px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.card-head { margin-bottom: 10px; }
+.card-head p { margin: 4px 0 0; }
+
+.kv { margin: 0; display: grid; gap: 4px; }
+.kv-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.kv dt { flex: 0 0 150px; color: var(--muted); }
+.kv dd { margin: 0; flex: 1 1 320px; word-break: break-word; }
+
+.grid { border-collapse: collapse; width: 100%; margin-top: 8px; }
+.grid th, .grid td { border-bottom: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+.grid th { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+.grid tbody tr:hover { background: #fafbfc; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 4px; }
+.toolbar input[type="search"] { flex: 1 1 280px; min-width: 200px; }
+.toolbar label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+
+input[type="search"], input[type="number"] {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  background: #fff;
+  color: inherit;
+}
+
+button {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  padding: 7px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { filter: brightness(1.08); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.ghost { background: #fff; color: var(--accent); }
+button.danger { background: var(--danger); border-color: var(--danger); }
+button.link { border: none; background: none; color: var(--accent); padding: 0; text-align: left; text-decoration: underline; }
+
+.code {
+  background: var(--code-bg);
+  color: var(--code-text);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+  max-height: 420px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.5 "Cascadia Mono", Consolas, monospace;
+  margin: 8px 0 0;
+}
+
+.alert {
+  border: 1px solid #efc3c0;
+  border-left: 4px solid var(--danger);
+  background: #fdeceb;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.alert strong { color: var(--danger); }
+.alert p { margin: 6px 0 0; }
+
+.list { margin: 8px 0 0; padding-left: 20px; }
+.note { color: var(--muted); margin: 8px 0 0; }
+.stack { display: flex; flex-direction: column; gap: 4px; }

@@ -1,0 +1,18 @@
+node_modules/
+data/
+dist/
+# Knowledge and backup directories must stay outside service version control.
+/raw/
+/wiki/
+/backups/
+# Keep only the empty default and generic example project registrations.
+/config/*.json
+!/config/projects.json
+!/config/projects.example.json
+# Runtime state a vault creates in place: locks, source registry, history and extraction cache.
+.wiki-server/
+*.local.json
+*.local.toml
+.env
+.env.*
+!.env.example

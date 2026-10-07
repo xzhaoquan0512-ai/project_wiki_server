@@ -1,0 +1,17 @@
+[Unit]
+Description=Project Wiki immutable source intake and fulltext indexing
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/project-wiki-server
+Environment=PROJECT_WIKI_MAX_SOURCE_MIB=32
+Environment=PROJECT_WIKI_LIBREOFFICE=/usr/bin/soffice
+ExecStart=/usr/bin/flock -w 60 /home/ubuntu/project-wiki-maintenance/job.lock /usr/bin/node /home/ubuntu/project-wiki-server/bin/maintain-vault.mjs scan /home/ubuntu/project-wiki-server/data/vault /home/ubuntu/project-wiki-incoming
+UMask=0077
+Nice=10
+MemoryMax=1200M
+TimeoutStartSec=2h
+NoNewPrivileges=true
+PrivateTmp=true

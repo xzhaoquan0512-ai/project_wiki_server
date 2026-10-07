@@ -1,0 +1,38 @@
+# Replace /absolute/path/project_wiki_server with the actual service directory.
+# On Windows, paths such as D:/Code/project_wiki_server are accepted.
+# Every environment path must be absolute: relative values would follow the MCP client's working directory.
+[mcp_servers.knowledge]
+command = "node"
+args = ["/absolute/path/project_wiki_server/bin/project-wiki-server.mjs", "wiki"]
+startup_timeout_sec = 30
+tool_timeout_sec = 180
+# Optional: select a specific vault instead of the default data/vault under the service directory.
+# env = { PROJECT_WIKI_VAULT = "/absolute/path/to/vault" }
+# Optional: enable legacy .doc/.ppt conversion with an installed LibreOffice.
+# env = { PROJECT_WIKI_LIBREOFFICE = "/usr/bin/soffice" }
+# Optional: limit this knowledge client to query tools.
+# enabled_tools = ["wiki_read_rules", "wiki_read_index", "wiki_read_note", "wiki_search", "wiki_status", "wiki_lint", "wiki_list_sources", "wiki_read_source", "wiki_check_sources", "wiki_note_history"]
+
+[mcp_servers.project]
+command = "node"
+args = ["/absolute/path/project_wiki_server/bin/project-wiki-server.mjs", "project"]
+startup_timeout_sec = 30
+tool_timeout_sec = 60
+# Optional: keep generic query sessions outside every registered project root.
+# env = { PROJECT_WIKI_STATE = "/absolute/path/to/project-sessions" }
+
+# ---------------------------------------------------------------------------
+# Alternative: keep the service on a Linux host and reach it over SSH stdio.
+# `ProgramData` is required on Windows clients: the MCP stdio transport inherits a
+# fixed allowlist that omits it, and ssh exits 255 without output when it is missing
+# (the client would only report "MCP error -32000: Connection closed").
+# Use a passphrase-free key or SSH_ASKPASS; there is no TTY for a passphrase prompt.
+# ---------------------------------------------------------------------------
+# [mcp_servers.knowledge_remote]
+# command = "ssh"
+# args = ["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-i", "C:/Users/me/.ssh/id_ed25519_deploy",
+#         "ubuntu@server.example", "env PROJECT_WIKI_LIBREOFFICE=/usr/bin/soffice PROJECT_WIKI_MAX_SOURCE_MIB=32 bash /home/ubuntu/project-wiki-server/deploy/ssh/start-wiki.sh"]
+# startup_timeout_sec = 30
+# tool_timeout_sec = 180
+# env = { ProgramData = "C:/ProgramData" }
+# SSH-local env is not automatically forwarded; set service variables in the remote command as above.
