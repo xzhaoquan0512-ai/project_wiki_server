@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { readProjectFile } from './generic-project-adapter.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, realpath, rm, stat, mkdir, writeFile } from 'node:fs/promises';
@@ -53,8 +55,8 @@ export class ProjectAdapter {
   capabilities(project) {
     return project.adapter === 'generic' ? genericCapabilities : {
       backend: 'context_session.py', selectors: ['path', 'id', 'section', 'pointer', 'lines', 'command_index', 'stream'],
-      operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'git-history', 'help', 'workset', 'recall'],
-      search: 'kind docs|wiki exactly as the backend defines them; the service forwards no selector the backend CLI does not accept, so source-code coverage follows the backend index rather than this service',
+      operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'git-history', 'help', 'workset', 'recall', 'files', 'search-code', 'capture-evidence', 'check-evidence', 'prepare', 'checkpoint', 'resume'],
+      search: 'project_search uses backend docs|wiki indexes. project_files and project_search_code run fixed literal rg queries via backend captures; rg must be installed. Continue captures with project_read.',
       session_storage: 'project backend query cache', freshness: 'preserves backend freshness and confidence',
     };
   }
@@ -67,7 +69,7 @@ export class ProjectAdapter {
 
   async call(operation, input, signal) {
     const project = this.project(input.project_id);
-    const allowed = ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'git-history', 'help', 'workset', 'recall'];
+    const allowed = ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'git-history', 'help', 'workset', 'recall', 'files', 'search-code', 'capture-evidence', 'check-evidence', 'prepare', 'checkpoint', 'resume'];
     if (!allowed.includes(operation)) throw new Error('Unsupported operation.');
     if (operation === 'git-status' && input.timeout_seconds !== undefined &&
         (!Number.isInteger(input.timeout_seconds) || input.timeout_seconds < 1 || input.timeout_seconds > 120)) {
@@ -96,12 +98,18 @@ export class ProjectAdapter {
 
   async #run(project, operation, input, signal) {
     if (signal?.aborted) throw new Error('Request cancelled.');
+    if (['capture-evidence', 'check-evidence'].includes(operation)) {
+      const deadline = AbortSignal.timeout(130000);
+      signal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    }
     if (project.adapter === 'generic') return this.generic.call(project, operation, input, signal);
     if (input.snapshot_id !== undefined || input.expected_hash !== undefined) {
       throw new Error('snapshot_id and expected_hash are supported only by the generic adapter.');
     }
+    if (['capture-evidence','check-evidence'].includes(operation)) return this.#evidence(project, operation, input, signal);
     // Both Git tools hand the backend one fixed argv file and drive its `run` subcommand.
-    const gitOperation = operation === 'git-status' || operation === 'git-history';
+    const observation = ['files','search-code'].includes(operation);
+    const gitOperation = operation === 'git-status' || operation === 'git-history' || observation;
     const args = [project.script, gitOperation ? 'run' : operation, `--root=${project.root}`];
     // A per-call request file handed to the backend; it is removed once the call is over.
     let disposable = '';
@@ -115,7 +123,18 @@ export class ProjectAdapter {
       option(args, 'reason', input.reason);
     } else if (gitOperation) {
       let argv;
-      if (operation === 'git-status') argv = ['git', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal'];
+      if (observation) {
+        if(input.offset!==undefined||input.limit!==undefined)throw Error('context_session search returns a bounded capture; continue it with project_read. offset/limit are generic-only.');
+        const prefix=input.path_prefix?relativePath(input.path_prefix):'.';await containedPath(project.root,prefix);
+        const globs=[...genericCapabilities.excluded_directories.map(name=>`!**/${name}/**`),'!.*','!**/.*','!*password*','!*secret*','!*credential*','!*id_rsa*','!*id_ed25519*','!*.pem','!*.key','!*.p12','!*.pfx'];
+        argv=operation==='files'?['rg','--files']:['rg','--json','--line-number','--fixed-strings','--ignore-case'];
+        if(operation==='files'&&input.query) {if(/[\[\]{}*?]/.test(input.query))throw Error('Filename query must be literal, without glob metacharacters.');argv.push('--iglob',`*${input.query}*`);}
+        // Exclusions come last: rg uses the last matching glob, so a filename query must
+        // never re-include a credential or generated-directory file.
+        for(const glob of globs)argv.push('--iglob',glob);
+        argv.push('--',...(operation==='search-code'?[input.query]:[]),prefix);
+      }
+      else if (operation === 'git-status') argv = ['git', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal'];
       else {
         // The path may name a file that no longer exists in the work tree but still has history,
         // so containment is verified against the nearest existing ancestor.
@@ -131,6 +150,19 @@ export class ProjectAdapter {
       // A repository-wide diff can exceed the default capture size; the backend then reports
       // capture_status output_limit instead of truncating silently, and the caller may raise it.
       option(args, 'max-bytes', operation === 'git-history' ? (input.max_bytes ?? 262144) : 262144);
+    } else if (operation === 'prepare') {
+      option(args,'goal',input.goal);
+      for(const value of input.paths??[]) {await containedPath(project.root,value);option(args,'path',relativePath(value));}
+      // Caller cannot choose an arbitrary output path; backend owns its documented cache.
+    } else if (operation === 'checkpoint') {
+      for(const evidence of input.summary.evidence)await containedPath(project.root,evidence.path);
+      const relative=`build/docs/mcp/handoffs/${input.session_id}-${randomUUID()}.json`;
+      const filename=await containedPath(project.root,relative,true);
+      await mkdir(path.dirname(filename),{recursive:true});await containedPath(project.root,relative,true);
+      await writeFile(filename,JSON.stringify(input.summary)+'\n',{flag:'wx'});
+      disposable=filename;option(args,'summary-file',relative);
+    } else if (operation === 'resume') {
+      option(args,'context-event',input.context_event);option(args,'context-reason',input.context_reason);
     } else if (operation === 'help') {
       option(args, 'command', input.command);
       option(args, 'offset', input.offset);
@@ -205,6 +237,7 @@ export class ProjectAdapter {
       let data;
       try { data = JSON.parse(stdout); }
       catch { throw new Error('Project backend did not return a complete JSON response.'); }
+      if(observation && data.result?.exit_code===1 && data.result?.complete && data.result?.stdout?.bytes===0) {data.status='passed';data.result.no_matches=true;data.result.command_exit_code=1;exitCode=0;}
       return {
         project_id: project.id, observed_at: new Date().toISOString(), exit_code: exitCode,
         backend: data, ...(stderr.trim() ? { diagnostic: stderr.trim().slice(0, 1200) } : {}),
@@ -217,4 +250,34 @@ export class ProjectAdapter {
       if (disposable) await rm(disposable, { force: true }).catch(() => {});
     }
   }
+  async #evidence(project, operation, input, signal) {
+    if(operation==='check-evidence'&&input.evidence.project_id!==project.id)throw Error('Evidence belongs to another project.');
+    const receipts=[];
+    const git=async()=>{
+      const r=await this.#run(project,'git-status',{...input,max_chars:2000},signal);receipts.push(r.backend.receipt_id);
+      if(r.exit_code!==0||r.backend.status!=='passed'||!r.backend.result?.complete)throw Error('Git evidence capture incomplete.');
+      const cap=r.backend.result.capture_id;
+      if(!/^CAP-[A-Za-z0-9-]+$/.test(cap))throw Error('Invalid backend capture identity.');
+      const output=await readFile(await containedPath(project.root,`build/docs/context-output/${input.session_id}/${cap}/stdout.txt`),'utf8');
+      return {commit:output.match(/^# branch\.oid ([a-f0-9]+)$/m)?.[1]??null,dirty:output.split('\n').some(l=>l&&!l.startsWith('#')),workspace_fingerprint:createHash('sha256').update(output).digest('hex')};
+    };
+    const before=await git(),files=[];
+    for(const previous of operation==='capture-evidence'?input.paths.map(path=>({path})):input.evidence.files) {
+      try {
+        const r=await this.#run(project,'read',{...input,path:previous.path,start_line:1,end_line:1,max_chars:2000},signal);receipts.push(r.backend.receipt_id);
+        if(r.exit_code!==0||r.backend.status!=='passed')throw Error('Backend source read failed.');
+        const f=await readProjectFile(project,previous.path);
+        if(!f.source.sha256.startsWith(r.backend.result.sha256))throw Error('File changed between backend observation and full digest capture.');
+        files.push({...f.source,hash_algorithm:'sha256',...(previous.sha256?{expected_sha256:previous.sha256,changed:f.source.sha256!==previous.sha256}:{})});
+      }catch(error){if(operation==='capture-evidence')throw error;files.push({path:previous.path,changed:true,error:error.message});}
+    }
+    const after=await git(),changedDuring=before.workspace_fingerprint!==after.workspace_fingerprint||before.commit!==after.commit;
+    const changed=operation==='check-evidence'&&(files.some(f=>f.changed)||input.evidence.commit!==after.commit||input.evidence.dirty!==after.dirty||input.evidence.workspace_fingerprint!==after.workspace_fingerprint);
+    const evidence={version:1,project_id:project.id,observed_at:new Date().toISOString(),...after,files,hash_algorithm:'sha256',changed_during_capture:changedDuring,
+      verification:'unverified',warning:'Per-file observations bound to backend receipts, not an atomic snapshot or build/hardware validation.'};
+    const value={project_id:project.id,exit_code:0,backend:{status:'passed',session:input.session_id,result:operation==='capture-evidence'?evidence:{...evidence,status:changedDuring?'inconclusive':changed?'needs_review':'unchanged'}},receipts,accounting:'Backend calls retain their session charges; this full-hash metadata envelope is additional MCP output.'};
+    if(JSON.stringify(value).length>(input.max_chars??4000))throw Error('Evidence response exceeds max_chars; increase it or request fewer files. Backend observations remain recorded.');
+    return value;
+  }
+
 }

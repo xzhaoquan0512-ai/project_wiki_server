@@ -48,7 +48,7 @@ export function validateImageSize(width, height) {
 
 /** Isolate parsers, native image decoding and OCR WASM so a timeout terminates all work. */
 export async function runExtractionWorker(operation, bytes, options = {}) {
-  if (!['image', 'pdf'].includes(operation)) throw new Error('Unknown extraction operation.');
+  if (!['image', 'pdf', 'render'].includes(operation)) throw new Error('Unknown extraction operation.');
   if (!(bytes instanceof Uint8Array) || bytes.length === 0 || bytes.length > MAX_BYTES) throw new Error(`Extraction input must contain 1 byte to ${MAX_SOURCE_MIB} MiB.`);
   const timeout = options.timeout_ms ?? DEFAULT_TIMEOUT_MS;
   extractionTextLimit(options.max_output_bytes);
@@ -184,7 +184,7 @@ async function extractImageInternal(bytes, { languages = 'eng+chi_sim', max_outp
 if (process.argv[2] === CHILD_FLAG && process.argv[1] === fileURLToPath(import.meta.url)) {
   process.once('message', async ({ operation, bytes, options }) => {
     try {
-      const result = operation === 'image' ? await extractImageInternal(bytes, options)
+      const result = operation === 'render' ? await (await import('./render.mjs')).renderInternal(bytes, options) : operation === 'image' ? await extractImageInternal(bytes, options)
         : await (await import('./pdf.mjs')).extractPdfInternal(bytes, options);
       process.send({ ok: true, result }, () => process.exit(0));
     } catch (error) { process.send({ ok: false, error: String(error.message || error).slice(0, 4000) }, () => process.exit(1)); }

@@ -1,3 +1,4 @@
+import { maintenanceStatus } from './maintenance-status.mjs';
 import { readdir } from 'node:fs/promises';
 import { checkExtractors } from '../../bin/check-extractors.mjs';
 import { lockStatus } from './vault-admin.mjs';
@@ -31,6 +32,7 @@ export async function opsStatus(root) {
 
   return {
     checked_at: new Date().toISOString(),
+    maintenance: await maintenanceStatus(root),
     vault: {
       locked: lock.locked === true,
       owner: lock.owner ?? null,
@@ -59,7 +61,7 @@ export async function opsStatus(root) {
     },
     notes: [
       'Read-only snapshot; no OCR, conversion, indexing, download or transaction replay was performed.',
-      'Backup and retention live outside the vault: this view cannot report them, see bin/maintain-vault.mjs and the operator schedule.',
+      'Backup and retention live outside the vault: receipt reports the last CLI outcome; systemd reports the current schedule and last service exit. Missing data is unknown.',
     ],
   };
 }

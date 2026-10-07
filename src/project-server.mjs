@@ -1,3 +1,4 @@
+import { evidenceSchema } from './lib/evidence-contract.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -21,7 +22,7 @@ export function createProjectServer(projects, options = {}) {
   // Creating a session and resizing its budget change session state; the query tools only read
   // project content, leaving the backend's own receipts and caches aside, the same convention the
   // knowledge tools already follow for reads that populate an extraction cache.
-  const readOnly = new Set(['project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_git_history', 'project_session_status', 'project_help', 'project_workset', 'project_recall']);
+  const readOnly = new Set(['project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_git_history', 'project_session_status', 'project_help', 'project_workset', 'project_recall', 'project_files', 'project_search_code', 'project_capture_evidence', 'project_check_evidence']);
   const register = (name, description, inputSchema, operation) => {
     server.registerTool(name, {
       description, inputSchema: z.object(inputSchema).strict(),
@@ -72,6 +73,27 @@ export function createProjectServer(projects, options = {}) {
     ...session, receipt: z.string().regex(/^OBS-[0-9]+-[0-9]+$/), pointer: z.string().min(1).max(500).optional(),
     ...lines, ...paging, format: z.enum(['rows', 'blocks']).optional(), force: z.boolean().optional(), ...limit,
   }, 'recall');
+  register('project_files', 'Find permitted source/config/document paths in the whitelist project. Excludes credentials, links and build/dependency directories. Generic uses offset/limit; context_session returns a bounded capture to continue with project_read, and refuses offset/limit.', {
+    ...session, query:z.string().max(1000).optional(), path_prefix:z.string().max(2048).optional(), ...paging, ...limit,
+  },'files');
+  register('project_search_code', 'Case-insensitive literal source/config/document search with line numbers. Generic provides hashes and offset/limit; context_session returns an accounted rg capture to continue with project_read. Fixed read-only scan captured by context_session; no caller-supplied executable or regex.', {
+    ...session, query:z.string().min(1).max(1000), path_prefix:z.string().max(2048).optional(), ...paging, ...limit,
+  },'search-code');
+  register('project_capture_evidence', 'Capture full SHA-256 file identities plus commit, dirty state and time. Result is unverified evidence, not build or hardware acceptance. Context adapter stores the JSON in its accounted capture; generic returns a JSON text snapshot.', {
+    ...session, paths:z.array(z.string().min(1).max(2048)).min(1).max(50), ...limit,
+  },'capture-evidence');
+  register('project_check_evidence', 'Re-read a captured evidence package on the project host. Returns unchanged/needs_review/inconclusive; does not update remote notes or rerun tests. Changed inputs require reassessing the conclusion.', {
+    ...session, evidence:evidenceSchema, ...limit,
+  },'check-evidence');
+  register('project_prepare', 'Create the backend handoff template in its fixed query cache. Does not checkpoint or invent decisions. context_session only.', {
+    ...session, goal:z.string().min(1).max(2000), paths:z.array(z.string().min(1).max(2048)).max(30).optional(), ...limit,
+  },'prepare');
+  register('project_checkpoint', 'Save an explicitly completed five-field handoff through a temporary file in the query cache. No caller-selected write path. Evidence hashes are backend 8-digit fingerprints, not full SHA-256. context_session only.', {
+    ...session, summary:z.object({goal:z.string().min(1).max(2000),evidence:z.array(z.object({path:z.string().min(1).max(2048),sha256:z.string().regex(/^(?:[a-f0-9]{8})?$/),locator:z.string().max(2000)}).strict()).max(50),decisions:z.array(z.string().max(2000)).max(50),open_questions:z.array(z.string().max(2000)).max(50),next_actions:z.array(z.string().max(2000)).max(50)}).strict().refine(value=>JSON.stringify(value).length<=4000,'Handoff summary must not exceed 4000 characters'), ...limit,
+  },'checkpoint');
+  register('project_resume', 'Resume only after a real compacted/new-context event; reason is caller-declared, not platform-certified. Preserves history. Do not use to top up budget. context_session only.', {
+    ...session, context_event:z.enum(['compacted','new-context']),context_reason:z.string().min(10).max(2000),...limit,
+  },'resume');
   register('project_adjust_budget', 'Adjust the existing session budget with a concrete reason, retaining accumulated usage and receipts. Does not reset conversation or session history.', {
     ...session, budget: z.number().int().min(8000).max(512000), reason: z.string().min(10).max(1000), ...limit,
   }, 'adjust-budget');

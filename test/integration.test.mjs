@@ -181,11 +181,11 @@ test('project MCP discovers only scoped query tools and refuses invalid file sel
   const client = await connect(t, createProjectServer(new Map([['project', { id: 'project', root, script: 'unused.py', python: 'unused' }]])));
   const tools = (await client.listTools()).tools;
   const names = tools.map(tool => tool.name);
-  assert.equal(names.length, 12);
+  assert.equal(names.length, 19);
   assert.ok(!names.some(name => /write|shell|execute/.test(name)));
   // Every tool states its behaviour, and the two calls that create or resize a session are not
   // advertised as reads; the query tools are, the same way knowledge reads are annotated.
-  const readOnly = new Set(['project_list', 'project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_git_history', 'project_session_status', 'project_help', 'project_workset', 'project_recall']);
+  const readOnly = new Set(['project_list', 'project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_git_history', 'project_session_status', 'project_help', 'project_workset', 'project_recall', 'project_files', 'project_search_code', 'project_capture_evidence', 'project_check_evidence']);
   for (const tool of tools) {
     assert.ok(tool.annotations, `${tool.name} has no annotations`);
     assert.equal(tool.annotations.readOnlyHint, readOnly.has(tool.name), `${tool.name} readOnlyHint`);
@@ -422,7 +422,7 @@ test('knowledge MCP serves rules, maintains links/index/log and preserves raw so
   await writeFile(path.join(root, 'wiki', 'index.md'), '# Wiki Index\n');
   await writeFile(path.join(root, 'wiki', 'concepts', 'Seed.md'), '---\ntitle: Seed\ntype: concept\nsources: [raw/source.md]\n---\n# Seed\nRelated [[Child]].\n');
   const client = await connect(t, await createWikiServer(root));
-  assert.equal((await client.listTools()).tools.length, 26);
+  assert.equal((await client.listTools()).tools.length, 29);
   assert.match((await client.readResource({ uri: 'wiki://rules' })).contents[0].text, /immutable/);
   const registered = await client.callTool({ name: 'wiki_register_source', arguments: { path: 'raw/source.md' } });
   assert.notEqual(registered.isError, true);

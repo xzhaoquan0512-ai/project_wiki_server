@@ -11,31 +11,29 @@ const chunkSize = 20;
  * Like queue(), it re-reads each recorded output note so a changed note reopens the task as
  * needs_review; maxNotes bounds those reads because a status query must stay a bounded read.
  */
-export async function compilationProgress(root, records, hash, { maxNotes = 200 } = {}) {
-  const ids = Object.keys(records ?? {}).filter(id => id.startsWith(`${hash}:`));
-  const statuses = ids.map(id => records[id]?.status);
-  let checked = 0, stale = 0, truncated = false;
-  for (const id of ids) {
-    for (const note of records[id]?.notes ?? []) {
-      if (checked >= maxNotes) { truncated = true; break; }
-      checked++;
-      try { if (sha256(await readFile(await safePath(root, note.path))) !== note.revision) stale++; }
-      catch { stale++; }
+export function sourceTasks(source) {
+  const hash = source.id.slice(7);
+  if (source.indexed && source.page_count) return Array.from({length:Math.ceil(source.page_count/chunkSize)},(_,i)=>({id:`${hash}:${i*chunkSize+1}-${Math.min((i+1)*chunkSize,source.page_count)}`,start_page:i*chunkSize+1,end_page:Math.min((i+1)*chunkSize,source.page_count)}));
+  if (source.indexed && source.unit_count) return Array.from({length:Math.ceil(source.unit_count/chunkSize)},(_,i)=>({id:`${hash}:units:${i*chunkSize+1}-${Math.min((i+1)*chunkSize,source.unit_count)}`,start_page:null,end_page:null,start_unit:i*chunkSize+1,end_unit:Math.min((i+1)*chunkSize,source.unit_count),locators:(source.unit_locators??[]).slice(i*chunkSize,(i+1)*chunkSize)}));
+  return [{id:`${hash}:source-source`,start_page:null,end_page:null}];
+}
+
+export async function compilationProgress(root, records, hash, { maxNotes = 200, source } = {}) {
+  const ids=source?sourceTasks(source).map(t=>t.id):Object.keys(records??{}).filter(id=>id.startsWith(`${hash}:`));
+  let checked=0,stale=0,review=0,summarized=0,pending=0,truncated=false;
+  for(const id of ids) {
+    const record=records[id];if(!record){pending++;continue;}
+    let current=true,complete=true;
+    for(const note of record.notes??[]) {
+      if(checked>=maxNotes){truncated=true;complete=false;break;} checked++;
+      try{if(sha256(await readFile(await safePath(root,note.path)))!==note.revision){stale++;current=false;}}catch{stale++;current=false;}
     }
-    if (truncated) break;
+    if(!complete || !current || record.status==='needs_review')review++;else if(record.status==='summarized')summarized++;else pending++;
   }
-  const recordedReview = statuses.filter(status => status === 'needs_review').length;
-  const needsReview = recordedReview + stale;
-  return {
-    semantic_status: !ids.length ? 'pending' : needsReview ? 'needs_review' : 'summarized',
-    compilation_tasks: ids.length, compilation_summarized: statuses.filter(status => status === 'summarized').length,
-    compilation_needs_review: needsReview, compilation_stale_notes: stale, compilation_checked_notes: checked,
-    compilation_scope: !ids.length
-      ? 'no compilation task has been recorded for this source yet'
-      : truncated
-        ? `recorded progress with at most ${maxNotes} output notes re-checked; run wiki_compile_queue for the complete list`
-        : 'recorded progress with every output note re-checked; semantic correctness stays the caller assessment',
-  };
+  return {semantic_status:source?.integrity!=='ok'&&source?'needs_review':review?'needs_review':pending||!ids.length?'pending':'summarized',
+    compilation_tasks:ids.length,compilation_summarized:summarized,compilation_pending:pending,compilation_needs_review:review,
+    compilation_stale_notes:stale,compilation_checked_notes:checked,compilation_check_truncated:truncated,
+    compilation_scope:`recorded progress with ${source?'all expected source ranges':'recorded ranges only'}; ${truncated?'note check incomplete, needs review':'output revisions checked'}; summarized means draft, not semantic or hardware verification`};
 }
 
 /** Progress is the caller's assessment, tied to immutable source and exact note revisions. */
@@ -50,9 +48,9 @@ export class CompilationStore {
     for (const source of sources.sources) {
       if (source.integrity !== 'ok') continue;
       const hash = source.id.slice(7);
-      const ranges = source.indexed ? Array.from({ length: Math.ceil(source.page_count / chunkSize) }, (_, i) => ({ start_page: i * chunkSize + 1, end_page: Math.min((i + 1) * chunkSize, source.page_count) })) : [{ start_page: null, end_page: null }];
+      const ranges = sourceTasks(source);
       for (const range of ranges) {
-        const id = `${hash}:${range.start_page ?? 'source'}-${range.end_page ?? 'source'}`;
+        const id = range.id;
         const record = saved.records[id];
         let current = Boolean(record);
         if (record) for (const note of record.notes) {

@@ -16,14 +16,14 @@ const MAX_FILES = 2000;
 const MAX_RESULTS = 500;
 const MAX_CACHE = 4 * 1024 * 1024;
 const excludedDirectories = new Set(['.git', 'node_modules', 'build', 'dist', 'data', 'target', 'vendor', 'venv', '.venv', '__pycache__', '.ssh', '.aws', '.azure', '.gnupg', '.idea', '.vscode', 'coverage']);
-const textExtensions = new Set(['.md', '.mdx', '.txt', '.rst', '.adoc', '.c', '.h', '.cc', '.hh', '.cpp', '.hpp', '.cxx', '.cs', '.py', '.pyi', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.vue', '.svelte', '.json', '.jsonc', '.yaml', '.yml', '.toml', '.xml', '.html', '.htm', '.css', '.scss', '.sql', '.sh', '.bash', '.ps1', '.bat', '.cmd', '.cmake', '.ini', '.cfg', '.conf', '.rs', '.go', '.java', '.kt', '.kts', '.swift', '.rb', '.php', '.lua', '.proto', '.csv', '.log']);
+const textExtensions = new Set(['.md', '.mdx', '.txt', '.rst', '.adoc', '.c', '.h', '.cc', '.hh', '.cpp', '.hpp', '.cxx', '.cs', '.py', '.pyi', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.vue', '.svelte', '.json', '.jsonc', '.yaml', '.yml', '.toml', '.xml', '.html', '.htm', '.css', '.scss', '.sql', '.sh', '.bash', '.ps1', '.bat', '.cmd', '.cmake', '.ini', '.cfg', '.conf', '.rs', '.go', '.java', '.kt', '.kts', '.swift', '.rb', '.php', '.lua', '.proto', '.csv', '.log', '.ld', '.lds', '.s', '.map', '.ninja', '.ioc']);
 const textNames = new Set(['dockerfile', 'makefile', 'cmakelists.txt', 'license', 'readme', '.gitignore', '.gitattributes', '.editorconfig']);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const now = () => new Date().toISOString();
 
 export const genericCapabilities = Object.freeze({
   backend: 'generic', selectors: ['path', 'start_line', 'end_line', 'start_column', 'offset', 'snapshot_id', 'expected_hash'],
-  operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'git-history'],
+  operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'git-history', 'files', 'search-code', 'capture-evidence', 'check-evidence'],
   search: 'case-insensitive literal search over permitted UTF-8 text; docs searches source and docs, wiki searches wiki/ and docs/wiki/',
   unsupported_selectors: ['id', 'section', 'pointer', 'force', 'command_index', 'stream', 'include_stale', 'include_views'],
   session_storage: 'service data/project-sessions or PROJECT_WIKI_STATE; project sources stay unchanged',
@@ -82,7 +82,7 @@ async function plainFile(filename, maxBytes) {
   return data;
 }
 
-async function readProjectFile(project, relative) {
+export async function readProjectFile(project, relative) {
   const normalized = relativePath(relative);
   if (!permitted(normalized)) throw new Error('File is excluded by the generic text/credential/directory policy.');
   const target = await containedPath(project.root, normalized);
@@ -112,7 +112,7 @@ async function readProjectFile(project, relative) {
   } finally { await handle.close(); }
 }
 
-async function listFiles(project, prefixes, signal) {
+export async function listFiles(project, prefixes, signal) {
   const files = [];
   let visited = 0, truncated = false;
   const walk = async relative => {
@@ -248,6 +248,13 @@ export class GenericProjectAdapter {
       state.budget_changes = [...(state.budget_changes ?? []), { at: now(), previous_budget: previousBudget, budget, reason: input.reason }].slice(-100);
       return { status: 'passed', previous_budget: previousBudget, reason: input.reason.slice(0, 200) };
     }
+    if (['files','search-code','capture-evidence','check-evidence'].includes(operation)) {
+      const {projectObservation}=await import('./project-observation.mjs');
+      const content=JSON.stringify(await projectObservation(project,operation,input,signal));
+      const source={path:`observation:${operation}`,sha256:hash(content),read_at:now()};
+      const snapshotId=this.#snapshot(state,{kind:'read',text:content,source});
+      return {status:'passed',snapshot_id:snapshotId,source,content,start_offset:0,range_end:content.length,continue_with:'project_read'};
+    }
     if (operation === 'search') return this.#search(project, input, state, signal);
     if (operation === 'read' || operation === 'evidence') return this.#read(project, operation, input, state);
     if (operation === 'git-status') {
@@ -283,7 +290,7 @@ export class GenericProjectAdapter {
     if (snapshotId !== undefined) {
       snapshot = state.snapshots[snapshotId];
       if (!snapshot) throw new Error('Unknown or evicted snapshot_id; begin a fresh read explicitly.');
-      if (snapshot.kind !== 'read' && snapshot.kind !== 'git-status') throw new Error('snapshot_id belongs to another operation.');
+      if (!['read','git-status','git-history'].includes(snapshot.kind)) throw new Error('snapshot_id belongs to another operation.');
       if (snapshot.source.path !== input.path) throw new Error('snapshot_id does not match the requested path.');
     } else {
       const file = await readProjectFile(project, input.path);

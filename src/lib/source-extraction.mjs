@@ -22,7 +22,7 @@ const MARKUP = new Set(['html', 'xml']);
 const CACHE_VERSION = '0.3.0-extraction-1';
 const MAX_CACHE_BYTES = 32 * 1024 * 1024;
 const pending = new Map();
-const enqueueExtraction = createExtractionQueue();
+export const enqueueExtraction = createExtractionQueue();
 
 export function sourceKind(filename, bytes) {
   const ext = path.extname(filename).toLowerCase();

@@ -1,3 +1,4 @@
+import { boundedResponse } from './response-pages.mjs';
 import { MAX_SOURCE_BYTES as MAX_BYTES, MAX_SOURCE_MIB } from './source-limits.mjs';
 import { readFile, open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -303,7 +304,7 @@ export class SourceStore {
 export function registerSourceTools(server, root, beforeLockedAction, commitFiles) {
   const store = new SourceStore(root, { beforeLockedAction, commitFiles });
   const invoke = callback => async input => {
-    try { return { content: [{ type: 'text', text: JSON.stringify(await callback(input), null, 2) }] }; }
+    try { return await boundedResponse(root, await callback(input)); }
     catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
   };
   const reference = z.string().max(1024).describe('Registered source:<sha256> ID or raw/path.');

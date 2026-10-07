@@ -12,7 +12,7 @@ import { MAX_SOURCE_BYTES } from './source-limits.mjs';
 import { safePath, sha256, writeJson } from './vault-io.mjs';
 
 const execute = promisify(execFile);
-const excluded = new Set(['backup-manifest.json', '.wiki-server/write.lock', '.wiki-server/recovery.lock', '.wiki-server/fulltext', '.wiki-server/extractions']);
+const excluded = new Set(['backup-manifest.json', '.wiki-server/write.lock', '.wiki-server/recovery.lock', '.wiki-server/fulltext', '.wiki-server/extractions', '.wiki-server/responses']);
 const backupPattern = /^auto-vault-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-f0-9-]+\.tar\.gz$/;
 
 async function fileInventory(root, relative = '') {
@@ -59,7 +59,7 @@ export async function createBackup(root, destination) {
         await fs.writeFile(target, bytes, { mode: 0o600 });
         files.push({ path: relative, sha256: sha256(bytes), bytes: bytes.length });
       }
-      await fs.writeFile(path.join(temp, 'backup-manifest.json'), JSON.stringify({ version: 1, created_at: new Date().toISOString(), files, excluded_regenerable: ['fulltext', 'extractions'], restore: 'Extract into a new empty vault, verify manifest, regenerate caches, then explicitly switch the service. Never extract over an active vault.' }, null, 2), { mode: 0o600 });
+      await fs.writeFile(path.join(temp, 'backup-manifest.json'), JSON.stringify({ version: 1, created_at: new Date().toISOString(), files, excluded_regenerable: ['fulltext', 'extractions', 'responses'], restore: 'Extract into a new empty vault, verify manifest, regenerate caches, then explicitly switch the service. Never extract over an active vault.' }, null, 2), { mode: 0o600 });
     });
     await execute('tar', ['-czf', archive, '-C', temp, '.'], { timeout: 300000, maxBuffer: 1048576 });
     await fs.chmod(archive, 0o600);

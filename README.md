@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml/badge.svg)](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml)
 
-独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **26 个工具**，工程服务提供 **12 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
+独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **29 个工具**，工程服务提供 **19 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
 
 ## 快速开始
 
@@ -27,16 +27,18 @@ node bin/project-wiki-server.mjs project
 
 这两条命令分别通过 stdio 等待 MCP 请求。客户端模板见 [Codex TOML](examples/codex.toml) 和 [通用 MCP JSON](examples/mcp.json)。执行 `npm run tools` 可通过真实 MCP 工具发现查看完整参数；该命令使用临时库，不改正式数据。`npm run panel` 另外启动本地管理面板（只读视图，见下文），不影响这两个 MCP 进程。
 
-## 知识工具：26 个
+## 知识工具：29 个
 
 | 工具 | 用途 |
 | --- | --- |
 | `wiki_read_rules` | 读取知识整理规范；另提供 `wiki://rules` 资源 |
 | `wiki_read_log` | 读取审计日志 `wiki/log.md` 的尾部（默认 200 行、上限 2000 行）；日志记录服务做过什么，不等于结果已独立验证 |
-| `wiki_ops_status` | 只读运维快照：写锁归属与待恢复事务数、抽取依赖就绪情况、全文索引覆盖、已登记的整理计数；不取锁、不跑 OCR/转换、不下载、不重放事务、也无法报告库外的备份 |
+| `wiki_ops_status` | 只读运维快照：写锁归属与待恢复事务数、抽取依赖就绪情况、全文索引覆盖、整理计数、最近扫描/备份校验回执和 Linux 定时任务状态；不执行维护操作 |
 | `wiki_read_index` | 查看当前知识目录，默认隐藏归档笔记 |
 | `wiki_search` | 检索标题、别名、标签、摘要和正文 |
-| `wiki_read_note` | 读取笔记、出处、关联、反链和当前 `revision` |
+| `wiki_read_note` | 有界读取笔记、出处、关联、反链和当前 `revision` |
+| `wiki_read_result` | 按快照 ID 继续读取超出总返回量限制的 JSON 响应 |
+| `wiki_project_references` | 按 `project_id` 查找含工程证据的笔记，供工程变化后逐条复核 |
 | `wiki_write_note` | 创建或更新笔记，检查来源并自动记录历史、索引和日志 |
 | `wiki_append_log` | 补充查询、研究等维护记录 |
 | `wiki_status` | 查看活跃/归档笔记及原始资料数量 |
@@ -45,6 +47,7 @@ node bin/project-wiki-server.mjs project
 | `wiki_register_source` | 登记已放入 `raw/` 的文件和版本指纹 |
 | `wiki_list_sources` | 分页列出已登记/未登记资料及完整性状态 |
 | `wiki_read_source` | 读取文本原文、清洗 HTML/XML，提取 Office 正文，识别 PDF 扫描页和图片文字 |
+| `wiki_read_image` | 返回已登记 PDF 页或图片原件的 PNG 图像，支持页/帧选择和局部裁剪 |
 | `wiki_check_sources` | 检查资料变化、丢失、新版本及受影响的笔记 |
 | `wiki_note_history` | 查看版本列表，或读取某个版本的完整正文 |
 | `wiki_restore_note` | 恢复历史内容，或撤销归档 |
@@ -52,7 +55,7 @@ node bin/project-wiki-server.mjs project
 | `wiki_merge_notes` | 保存合并后的正文、合并来源、更新引用并归档旧笔记 |
 | `wiki_archive_note` | 归档而不删除，保留出处和可恢复历史 |
 | `wiki_rebuild_index` | 显式重建磁盘索引，保留生成区域外的手工文字 |
-| `wiki_search_sources` | 在已索引的 PDF 文字中检索，返回原件哈希和物理页码 |
+| `wiki_search_sources` | 在已索引的 PDF、Office、HTML/XML、文本和 OCR 内容中检索，返回哈希与格式对应的位置 |
 | `wiki_source_outline` | 分页读取 PDF 书签与对应页码，书签不代表已完成摘要 |
 | `wiki_index_status` | 查看全文索引覆盖、文字稀少页和截断页 |
 | `wiki_compile_queue` | 查看按原件哈希划分的整理任务，笔记修改后回到待复核 |
@@ -60,7 +63,13 @@ node bin/project-wiki-server.mjs project
 
 ### 返回量限制与翻页
 
-长结果不会一次全部回显，也不会重复携带同一段正文：`wiki_read_index`、`wiki_read_note`、`wiki_note_history`（读单个版本时）、`wiki_lint`、`wiki_status`、`wiki_check_sources` 都接受 `offset`/`limit`（或 `max_chars`）并返回 `total*`/`next_offset`/`truncated` 供续读；`wiki_search` 也支持 `offset` 翻页（按分数排序，返回条数少于 `limit` 即到底）。`wiki_read_note` 默认 `view: content` 只回一次正文，需要带 frontmatter 的原文用 `view: raw`，两者都要用 `view: both`。`wiki_index_status.semantic_status` 反映该资料已登记的整理任务状态（`pending`/`summarized`/`needs_review`），不再固定为 `pending`；输出笔记是否仍与记录版本一致，仍由 `wiki_compile_queue` 复核。
+长结果不会一次全部回显，也不会重复携带同一段正文：`wiki_read_index`、`wiki_read_note`、`wiki_note_history`（读单个版本时）、`wiki_lint`、`wiki_status`、`wiki_check_sources` 都接受 `offset`/`limit`（或 `max_chars`）并返回 `total*`/`next_offset`/`truncated` 供续读；`wiki_search` 也支持 `offset` 翻页（按分数排序，返回条数少于 `limit` 即到底）。`wiki_read_note` 默认 `view: content` 只回一次正文，需要带 frontmatter 的原文用 `view: raw`，两者都要用 `view: both`。`wiki_index_status.semantic_status` 反映该资料已登记的整理任务状态（`pending`/`summarized`/`needs_review`），不再固定为 `pending`；统计包含尚未登记整理记录的全部应有页段/单元段；状态接口与 `wiki_compile_queue` 都复核输出笔记版本。
+
+`view: both` 的两份正文共用 `max_chars` 额度（各最多一半），续页会覆盖较长的原始 Markdown 尾部。分页时传首次返回的 `expected_revision` 可检测中途修改；不传则每次读取当前内容。
+
+当正文、元数据、来源影响列表等整个 JSON 响应超过 64000 个序列化字符，工具返回 `format: json_fragment`、`snapshot_id`、`text` 和 `next_offset`。继续调用 `wiki_read_result`，按顺序拼接 `text` 后执行一次 `JSON.parse`。每片最多 6000 字符；快照最多 16 MiB、保留至多 24 小时，缓存最多 32 份/32 MiB，达到容量时旧快照可能提前清理。缺失/过期时须重新查询。这是原请求的历史结果，不是再次校验来源；需要新鲜状态时重新调用原接口。缓存不进入备份。
+
+`wiki_read_image` 需要原件哈希仍匹配；返回标准 MCP `image` 内容和来源哈希、物理页号、尺寸。`max_side` 为 256–4096，默认 1600；`crop` 的 x/y/width/height 为 0–1 的页内比例。它与提取共用排队限制，适用于 PDF 与 PNG/JPEG/WebP/BMP/TIFF；不会自动解释图纸，也不会渲染 Office 内嵌图表。
 
 ## 从资料整理成笔记
 
@@ -214,7 +223,7 @@ ssh -N -L 8790:127.0.0.1:8790 <user>@<host>
 
 `deploy/ssh/start-panel.sh` 与 MCP 启动脚本同样读取 `PROJECT_WIKI_NODE`、`PROJECT_WIKI_VAULT`、`PROJECT_WIKI_PANEL_HOST`、`PROJECT_WIKI_PANEL_PORT`，默认 `127.0.0.1:8790`；只有显式设置 `PROJECT_WIKI_PANEL_ALLOW_REMOTE=1` 才会绑定非回环地址，模板 unit 不设置它。面板与 MCP 进程各自独立，互不依赖。
 
-## 工程工具：12 个
+## 工程工具：19 个
 
 | 工具 | 用途 |
 | --- | --- |
@@ -230,14 +239,29 @@ ssh -N -L 8790:127.0.0.1:8790 <user>@<host>
 | `project_help` | 在会话内读取后端自己的子命令帮助（有界、计控制输出） |
 | `project_workset` | 按**工程内** JSON spec 让后端组装工作集；服务只校验路径不越界，不读取或解释 spec |
 | `project_recall` | 按本次会话返回过的回执编号（`OBS-段-序号`）重读该次观察 |
+| `project_files` | 按路径前缀和字面文件名查找工程文件 |
+| `project_search_code` | 按字面关键词搜索源码/配置，返回行位置或后端捕获 |
+| `project_capture_evidence` | 记录提交、工作区状态、时间及选定文件的完整 SHA-256 |
+| `project_check_evidence` | 对照之前的证据包，返回 unchanged / needs_review / inconclusive |
+| `project_prepare` | 在后端查询缓存生成五字段交接模板；不代填判断 |
+| `project_checkpoint` | 保存调用者补全的交接摘要，只写查询缓存 |
+| `project_resume` | 在真实压缩/新上下文后续接，保留来源变化检查和历史 |
 
 `project_git_history` 只接受一个 `mode`、**至多一个** revision（`HEAD`、`HEAD~2`、`main` 这类，不接受区间与任何 flag）和至多一个工程内路径，服务自己拼出固定 argv：不会出现第二个命令、`-c` 覆盖或外部差异程序。`context_session` 把 argv 交给后端执行（后端另行注入 `--no-ext-diff --no-textconv`、禁用 pager 与签名显示）；`generic` 直接调用 Git，同样带上这些安全开关并清空 `GIT_*` 环境——`.gitattributes` 里的 textconv 过滤器不会因此获得执行机会。Git 历史只说明改动过程，不是验证结论。
 
 输出按 `max_bytes`（默认 256 KiB，可设 64 KiB–1 MiB）截断，**截断是显式的**：后端返回 `capture_status: "output_limit"`、`complete: false` 并保存完整捕获到 `manifest_path`，调用方可用 `ref`/`path` 收窄请求，或用 `project_read` 按行续读该捕获，而不是把截断内容当成完整 diff。
 
-`project_help`、`project_workset`、`project_recall` 只存在于 `context_session` 适配器：它们驱动目标工程后端自己的 `help`/`workset`/`recall` 子命令，`project_list.capabilities.operations` 会列出实际支持的操作，普通 `generic` 工程会明确拒绝。回执重读不等于重新验证——它取回的是当时记录的观察，而不是当前事实。
+`project_help`、`project_workset`、`project_recall`、`project_prepare`、`project_checkpoint`、`project_resume` 只存在于 `context_session` 适配器：它们驱动目标工程后端自己的 `help`/`workset`/`recall` 子命令，`project_list.capabilities.operations` 会列出实际支持的操作，普通 `generic` 工程会明确拒绝。回执重读不等于重新验证——它取回的是当时记录的观察，而不是当前事实。
 
 源码检索的覆盖范围由适配器说明，不从服务层猜测：`generic` 做大小写不敏感的字面检索（覆盖允许的源码与文档、`wiki/` 与 `docs/wiki/`），已知路径的源码用 `project_read`；`context_session` 的 `kind` 只有 `docs`/`wiki` 两种，实际覆盖取决于目标工程自己的文档索引。服务只转发后端 CLI 真正接受的参数——例如后端内部声明但 CLI 未定义 flag 的 `record_type` 不会被透传，以免真实调用因未知参数直接失败。
+
+`project_files` / `project_search_code` 提供独立于文档索引的入口。`context_session` 通过后端 `run` 执行服务固定的 `rg` 参数（本机需安装 ripgrep），不接受任意命令；结果存入后端捕获，用 `project_read` 跟随行/列续读。无匹配是正常空结果，原始退出码仍保留。`generic` 使用自身受限文件遍历，支持 `offset/limit`；它是每次重新扫描，文件变化可能使分页移动。隐藏目录、依赖/构建目录及明显凭据文件不参与搜索。`context_session` 不接受这两个新接口的 `offset/limit`，避免静默忽略分页参数。
+
+工程证据包的 `files[].sha256` 是 64 位完整摘要；`context_session` 同时保留后端原生的 8 位指纹和读取回执。后端预算记录后端输出，完整哈希元数据另计 MCP 输出量。一次证据采集/复核最多执行 130 秒，客户端请求超时需保留收尾时间（模板为 180 秒）。可将包保存到笔记 `frontmatter.provenance[].evidence`，并提供一致的 `project_id` 和明确的 `scope`。已有短指纹须使用 `hash: {algorithm: "sha256-prefix", value: "12345678"}`，不能补零冒充完整 SHA-256。
+
+关联知识复核流程：调用 `wiki_project_references(project_id)` → 取证据包调用 `project_check_evidence` → 重新读取变化的证据 → 用当前 `revision` 更新笔记和复核说明。旧笔记没有证据包时，需要明确重新采集，服务不猜测旧依据。`unchanged` 仅说明选定文件/提交/工作区状态与记录一致；逐文件读取不是原子快照，也不代表构建或硬件验证。Linux 知识服务不会自行访问 Windows 工程，这个流程由能连接两个服务的客户端完成。
+
+会话交接遵循目标工程协议：`project_prepare` 返回缓存摘要路径，读取并补全 goal/evidence/decisions/open_questions/next_actions 后传给 `project_checkpoint`（共最多 4000 字符）；临时输入文件限制在 `build/docs/mcp/handoffs/` 并在调用后清理。不提供调用者自选写入位置。只有实际发生 `compacted` 或 `new-context` 才使用 `project_resume`；原因由调用者声明，不冒充平台认证，也不用于增加额度。
 
 ### 接入普通工程
 
@@ -370,13 +394,15 @@ PROJECT_WIKI_MAX_SOURCE_MIB=32 node bin/maintain-vault.mjs backup /absolute/vaul
 node bin/maintain-vault.mjs verify /absolute/new-empty-restore-directory
 ```
 
-PDF 索引按原件 SHA-256 分代保存至 `.wiki-server/fulltext/`，逐页校验，原件变化后不会返回旧内容冒充当前证据。每份 PDF 最多 2000 页、每页 200000 字符、全文 64 MiB；超限或文字稀少需明确处理。当前索引是文字层的字面检索，没有自动理解全部图表或 OCR 全书。单页 OCR 和其他文档格式沿用 `wiki_read_source`。
+.wiki-server 全文索引按原件 SHA-256 分代保存至 `.wiki-server/fulltext/`，逐页校验，原件变化后不会返回旧内容冒充当前证据。每份 PDF 最多 2000 页、每页 200000 字符、全文 64 MiB；超限或文字稀少需明确处理。索引 V2 支持 PDF 文字层及 OCR、Office、HTML/XML、文本、图片 OCR；默认对文字稀少 PDF 页自动 OCR，混合图文页需显式 force。OCR 与原文字层分开保留和检索。旧版 V1 仍可读取；下一次显式索引或已部署的扫描任务会生成 V2，原件与整理记录不变。其他格式保留提取单元及工作表/段落/DOM 等定位，最多 10000 单元，并沿用各解析器的提取上限，索引成功不表示原件全部信息都已提取。
+
+可用 `node bin/index-sources.mjs /absolute/vault <reference> <auto|off|force> <eng|chi_sim|eng+chi_sim>` 按资料指定选项；相同哈希与选项复用缓存，已完成 force 的缓存也可供 auto 复用。图表、公式和内嵌图片的限制仍按上文格式表，检索是字面匹配，不是语义核验。
 
 `scan` 检查 incoming 中已稳定 60 秒的普通文件；上传时可先用 `.part` 后缀，再重命名。相同内容去重，同名不同内容另存，原件不覆盖。不猜测版本关系，需要明确 `previous`。新增受支持的其他格式也进入整理队列，通过原有读取工具逐单元处理。已登记原件的哈希改变、文件丢失或导入异常会使维护返回失败，并保留原件和待办。
 
-PDF 整理任务为连续 20 页，其他格式按来源建立任务。`summarized` 仅表示调用者已完成该范围的草稿笔记；`needs_review` 保留不确定性。记录时检查来源、笔记引用及笔记版本，服务不替调用者理解原文。`wiki_compile_queue` 是语义整理进度入口，引用计数和索引覆盖均不可替代它。
+PDF 整理任务为连续 20 页，其他已索引格式按连续 20 个提取单元建立任务；长纯文本按最多 5000 字符划为单元，保留字符 offset 和行号，使用 wiki_read_source 的 offset 续读。未索引/空提取资料仍保留整份任务。旧的整份整理记录保留，但不会自动把新单元任务全部标为完成。`summarized` 仅表示调用者已完成该范围的草稿笔记；`needs_review` 保留不确定性。记录时检查来源、笔记引用及笔记版本，服务不替调用者理解原文。`wiki_compile_queue` 是语义整理进度入口，引用计数和索引覆盖均不可替代它。
 
-Linux 定时任务样例在 `deploy/maintenance/`。它们示范 ubuntu 用户、固定安装路径、北京时间每 15 分钟扫描和每日 03:15 备份，部署前须调整到真实用户与目录，并创建 incoming、backup、维护锁目录。安装后通过 systemd 检查实际运行结果，不把 timer 启用当成任务成功。
+Linux 定时任务样例在 `deploy/maintenance/`。它们示范 ubuntu 用户、固定安装路径、北京时间每 15 分钟扫描和每日 03:15 备份，部署前须调整到真实用户与目录，并创建 incoming、backup、维护锁目录。安装后通过 systemd 检查实际运行结果，不把 timer 启用当成任务成功。`wiki_ops_status` 会读取本库 `.wiki-server/maintenance/` 中的最近扫描/备份成功或失败回执，并单独查询上述固定名称的 systemd 服务和 timer；未生成回执或不存在 unit 时明确报告未知/不可用，旧成功回执不能抵消更晚的服务失败。它不会遍历或校验任意外部备份目录。
 
 Windows 没有随仓库提供的定时任务，需要自行登记计划任务。`maintain-vault.mjs backup` **只支持 Linux**（它依赖 Linux `tar`），在 Windows 上只能手动执行 `index-sources.mjs` 和 `maintain-vault.mjs scan`，备份请另择方式，并把 vault 整体（含隐藏的 `.wiki-server/`）一起保存：
 

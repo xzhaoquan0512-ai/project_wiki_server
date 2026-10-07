@@ -10,7 +10,7 @@ try {
   const wiki = await connectLocal('wiki', vault);
   try {
     const tools = (await wiki.listTools()).tools;
-    assert.equal(tools.length, 26);
+    assert.equal(tools.length, 29);
     for (const name of ['wiki_read_source', 'wiki_check_sources', 'wiki_note_history', 'wiki_restore_note', 'wiki_rename_note', 'wiki_merge_notes', 'wiki_archive_note', 'wiki_rebuild_index', 'wiki_read_log', 'wiki_ops_status']) {
       assert.ok(tools.some(tool => tool.name === name), `Missing knowledge tool: ${name}`);
     }
@@ -22,7 +22,7 @@ try {
   const project = await connectLocal('project', config);
   try {
     const tools = (await project.listTools()).tools;
-    assert.equal(tools.length, 12);
+    assert.equal(tools.length, 19);
     const projects = await callJson(project, 'project_list');
     assert.ok(Array.isArray(projects));
     report.checks.push({ service: 'project', tools: tools.map(tool => tool.name), registered_projects: projects.length });
