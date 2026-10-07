@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, symlink, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, symlink, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -107,6 +107,73 @@ test('Git snapshot uses a fixed argv and a repository-relative evidence input', 
   };
   const adapter = new ProjectAdapter(new Map([['project', { id: 'project', root, script: 'backend.py', python: 'python' }]]), runner);
   await adapter.call('git-status', { project_id: 'project', session_id: 'CTX-test' });
+  // The request file is backend input, not a report: the project must not accumulate one per query.
+  assert.deepEqual(await readdir(path.join(root, 'build/docs/mcp/argv')), []);
+});
+
+test('concurrent Git snapshots keep separate request files and remove all of them', async t => {
+  const root = await fixture(t);
+  const seen = [];
+  const runner = async (_exe, args) => {
+    const file = args.find(value => value.startsWith('--argv-file=')).slice('--argv-file='.length);
+    seen.push(path.basename(file));
+    // Hold both calls in flight together: a shared file name would let one call read the other's argv.
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.deepEqual(JSON.parse(await readFile(path.join(root, file), 'utf8')),
+      ['git', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal']);
+    return { stdout: JSON.stringify({ status: 'passed' }), stderr: '' };
+  };
+  const adapter = new ProjectAdapter(new Map([['project', { id: 'project', root, script: 'backend.py', python: 'python' }]]), runner);
+  await Promise.all([
+    adapter.call('git-status', { project_id: 'project', session_id: 'CTX-a' }),
+    adapter.call('git-status', { project_id: 'project', session_id: 'CTX-b' }),
+  ]);
+  assert.equal(new Set(seen).size, 2);
+  assert.deepEqual(await readdir(path.join(root, 'build/docs/mcp/argv')), []);
+});
+
+test('a Git snapshot that fails before answering still removes its request file', async t => {
+  const root = await fixture(t);
+  const runner = async () => { throw new Error('backend refused to start'); };
+  const adapter = new ProjectAdapter(new Map([['project', { id: 'project', root, script: 'backend.py', python: 'python' }]]), runner);
+  await assert.rejects(adapter.call('git-status', { project_id: 'project', session_id: 'CTX-test' }),
+    /Project query process failed/);
+  assert.deepEqual(await readdir(path.join(root, 'build/docs/mcp/argv')), []);
+});
+
+test('MCP Git timeouts are bounded and reach both adapters without killing backend receipt capture early', async t => {
+  const base = await fixture(t);
+  for (const kind of ['context_session', 'generic']) {
+    const root = path.join(base, kind);
+    await mkdir(root);
+    const calls = [];
+    const runner = async (executable, args, options) => {
+      calls.push({ executable, args, options });
+      return { stdout: kind === 'generic' ? '# branch.head fixture\n' : JSON.stringify({ status: 'passed', session: 'CTX-timeout' }), stderr: '' };
+    };
+    const client = await connect(t, createProjectServer(new Map([['demo', {
+      id: 'demo', root, adapter: kind, script: 'backend.py', python: 'python',
+    }]]), { runner, stateDirectory: path.join(base, `state-${kind}`) }));
+    const began = await client.callTool({ name: 'project_begin', arguments: { project_id: 'demo' } });
+    assert.ok(!began.isError);
+    const backend = JSON.parse(began.content[0].text).backend;
+    const scope = { project_id: 'demo', session_id: backend.session ?? backend.session_id };
+    calls.length = 0;
+    const result = await client.callTool({ name: 'project_git_status', arguments: { ...scope, timeout_seconds: 120 } });
+    assert.ok(!result.isError);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].options.timeout, kind === 'generic' ? 120000 : 130000);
+    if (kind === 'context_session') assert.ok(calls[0].args.includes('--timeout=120'));
+    for (const timeout_seconds of [0, 121, 1.5]) {
+      const invalid = await client.callTool({ name: 'project_git_status', arguments: { ...scope, timeout_seconds } });
+      assert.equal(invalid.isError, true);
+    }
+    assert.equal(calls.length, 1);
+    const defaults = await client.callTool({ name: 'project_git_status', arguments: scope });
+    assert.ok(!defaults.isError);
+    assert.equal(calls.at(-1).options.timeout, kind === 'generic' ? 20000 : 30000);
+    if (kind === 'context_session') assert.ok(calls.at(-1).args.includes('--timeout=20'));
+  }
 });
 
 test('project MCP discovers only scoped query tools and refuses invalid file selectors', async t => {

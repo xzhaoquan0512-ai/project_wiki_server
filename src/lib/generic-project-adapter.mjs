@@ -251,7 +251,7 @@ export class GenericProjectAdapter {
     if (operation === 'git-status') {
       try {
         const { stdout } = await this.runner('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal', '--', '.'], {
-          cwd: project.root, shell: false, windowsHide: true, timeout: 20000, maxBuffer: 262144, encoding: 'utf8', signal,
+          cwd: project.root, shell: false, windowsHide: true, timeout: (input.timeout_seconds ?? 20) * 1000, maxBuffer: 262144, encoding: 'utf8', signal,
           env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GIT_'))), GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
         });
         const snapshotId = this.#snapshot(state, { kind: 'git-status', text: stdout, source: { path: 'git:status', sha256: hash(stdout), read_at: now() } });

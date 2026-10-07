@@ -40,11 +40,13 @@ export function createProjectServer(projects, options = {}) {
     ...session, path: z.string().optional(), id: z.string().optional(), section: z.string().optional(), pointer: z.string().optional(),
     force: z.boolean().optional(), ...lines, ...paging, ...limit, ...snapshot, ...expectedHash,
   }, 'read');
-  register('project_evidence', 'Read an existing UTF-8 evidence/report file; generic returns its hash and location, with snapshot_id continuation. command_index/stream/force/limit require context_session. Does not rerun tests or turn historical results into current verification.', {
+  register('project_evidence', 'Read existing evidence. Generic accepts UTF-8 report files with hash/location and snapshot_id continuation. context_session requires backend-supported RUN/EVD records; use project_read with pointer for ordinary JSON reports. command_index/stream/force/limit require context_session. Does not rerun tests or turn historical results into current verification.', {
     ...session, path: z.string().min(1), command_index: z.number().int().min(0).optional(), stream: z.enum(['stdout', 'stderr']).optional(),
     force: z.boolean().optional(), ...lines, ...paging, ...limit, ...snapshot, ...expectedHash,
   }, 'evidence');
-  register('project_git_status', 'Capture a fresh, fixed read-only git status command through the project session. Reports current commit/branch and working-tree changes; it does not validate code or run tests.', { ...session, ...limit }, 'git-status');
+  register('project_git_status', 'Capture a fresh, fixed read-only git status command through the project session. Reports current commit/branch and working-tree changes; it does not validate code or run tests. timeout_seconds defaults to 20; slow mounted projects may need up to 120. Allow a longer client request timeout as well.', {
+    ...session, ...limit, timeout_seconds: z.number().int().min(1).max(120).optional(),
+  }, 'git-status');
   register('project_session_status', 'Read query session usage and continuation state. This is not project completion or hardware health.', { ...session, ...limit }, 'status');
   register('project_adjust_budget', 'Adjust the existing session budget with a concrete reason, retaining accumulated usage and receipts. Does not reset conversation or session history.', {
     ...session, budget: z.number().int().min(8000).max(512000), reason: z.string().min(10).max(1000), ...limit,

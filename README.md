@@ -243,11 +243,21 @@ Windows 路径可写为 `D:/Code/my-project`。`adapter` 有三个选项：
 
 完整示例见 [projects.example.json](config/projects.example.json)，不要把不存在的示例工程直接登记。修改配置后重新启动工程 MCP 进程。
 
+`context_session` 后端需要 Python 3。未配置 `python` 时，Windows 使用 `python`，Linux/WSL/macOS 使用 `python3`。可在工程条目中设置 `"python": "/absolute/path/to/python3"` 指定解释器；显式配置始终优先，路径无效会报错，不会自动换用其他解释器。
+
 通用适配器使用 UTF-8 文本和大小写不敏感的字面检索。`kind: docs` 检索允许的源码/文档，`kind: wiki` 仅检索 `wiki/` 和 `docs/wiki/`。会排除生成目录、隐藏目录、依赖、二进制和已知凭据文件；精确限制可在 `project_list.capabilities` 查看。每个文件最多 1 MiB，单次检索最多 8 MiB、2000 个文件和 500 个命中，达到限制会明确返回截断信息。
 
 先 `project_begin`，再沿同一个 `session_id` 读取规则、检索和查询。正文带 SHA-256、读取时间与行列位置，返回 `next_arguments` 时结合原 `project_id/session_id` 继续。`snapshot_id` 表示同一份缓存的历史内容，续读不会悄悄换成改过的新文件；要检查最新版本需发起新读取，可传 `expected_hash` 比较。缓存最多 8 份或 4 MiB，被清理后会报错而不是自动切换内容。
 
 `generic` 仅支持 `query` profile；不支持原后端专用的文档 ID、section、JSON pointer、输出流选择等参数，传入时明确报错。原 `context_session` 适配器保持其会话、定位、可信状态、预算和续读语义。
+
+`context_session` 的返回正文在 `backend` 中，字段沿用目标后端协议。例如后端以 `backend.session` 返回会话 ID 时，将该值作为后续工具的 `session_id`；不要假定它与 `generic` 的 `backend.session_id` 同名。`backend.result.next_line/next_column/next_offset` 等续读字段和 `confidence/freshness/validation` 等状态也按原样保留。续读字段按该次操作实际返回的内容为准：`read`/`search` 给大纲与 `next_offset`，`run`（`project_git_status`）给预览的 `next_line`/`next_column`；服务不假定某个操作一定有某组字段。
+
+`project_evidence` 的文件类型也由适配器决定：`generic` 可读取普通 UTF-8 报告，`context_session` 使用后端支持的正式 RUN/EVD 记录。普通 JSON 报告使用 `project_read`，用 `pointer` 定位所需值。读取成功只证明取得了历史证据，不代表重跑了报告中的检查。
+
+`project_git_status` 默认等待 Git 最多 20 秒。WSL 挂载盘或较大工程可传 `timeout_seconds`（整数，1–120）延长等待；`context_session` 外层进程额外留 10 秒保存回执。客户端的请求超时也应大于这段时间。超时仍返回失败，不能当成工作区干净或查询成功。
+
+`context_session` 的 `project_git_status` 把固定的只读命令 `git status --porcelain=v2 --branch --untracked-files=normal` 写成工程内 `build/docs/mcp/argv/` 下的请求文件交给后端。该文件按调用唯一命名，避免多个 MCP 进程互相覆盖，并在调用结束（含超时、失败）后由服务删除，不留下每次查询的遗留文件；后端会把实际 argv 复制进自己的 capture 目录。
 
 该适配器与本服务之间的接口有回归测试覆盖：`test/context-session.test.mjs` 会生成一个最小的 Python 后端（实现同样的子命令与参数），并断言适配器实际发出的 `--session/--max-chars/--profile/--budget/--reason/--kind/--query/--path/--section/--pointer/--start-line/--command-index/--stream/--argv-file` 等参数、JSON 契约、同一 session 的串行化，以及"非 JSON 输出""非零退出但带回执""无输出"三类失败路径。测试不依赖任何具体工程的 `context_session.py`，只要求本机有 Python；缺少 Python 时按用例粒度跳过并给出原因。适配器本身不校验也不探测后端版本，接口不一致会在调用时以明确错误暴露。
 
@@ -362,4 +372,3 @@ AI 整理由获授权的模型客户端消费队列，服务器本身不内置�
 服务代码以 [MIT 许可证](LICENSE) 授权，可自由使用、修改与再分发，仅需保留版权与许可声明。
 
 该许可只覆盖本仓库中的代码、模板和文档。它不覆盖任何知识库内容：`data/vault/`、运行数据、原始资料以及各工程自身的代码都不在本仓库内，也不随本许可分发。第三方依赖仍归其各自作者所有，并受各自许可证约束（见上文链接）。
-

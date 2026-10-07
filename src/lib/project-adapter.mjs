@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, realpath, stat, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, realpath, rm, stat, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { GenericProjectAdapter, genericCapabilities } from './generic-project-adapter.mjs';
@@ -32,7 +32,8 @@ export async function loadProjects(configPath) {
     }
     const adapter = script ? 'context_session' : 'generic';
     if (item.python !== undefined && (typeof item.python !== 'string' || !item.python.trim())) throw new Error('python must be an executable name or path.');
-    projects.set(item.id, { id: item.id, root, adapter, script, python: item.python ?? 'python', description: item.description ?? '' });
+    const python = item.python ?? (process.platform === 'win32' ? 'python' : 'python3');
+    projects.set(item.id, { id: item.id, root, adapter, script, python, description: item.description ?? '' });
   }
   return projects;
 }
@@ -65,6 +66,10 @@ export class ProjectAdapter {
     const project = this.project(input.project_id);
     const allowed = ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status'];
     if (!allowed.includes(operation)) throw new Error('Unsupported operation.');
+    if (operation === 'git-status' && input.timeout_seconds !== undefined &&
+        (!Number.isInteger(input.timeout_seconds) || input.timeout_seconds < 1 || input.timeout_seconds > 120)) {
+      throw new Error('timeout_seconds must be an integer from 1 to 120.');
+    }
     if (operation !== 'begin' && !safeId.test(input.session_id ?? '')) throw new Error('A valid session_id is required.');
     // Calls sharing a project/session must not race the backend's bookkeeping lock.
     const key = `${project.id}:${input.session_id ?? 'begin'}`;
@@ -82,6 +87,8 @@ export class ProjectAdapter {
       throw new Error('snapshot_id and expected_hash are supported only by the generic adapter.');
     }
     const args = [project.script, operation === 'git-status' ? 'run' : operation, `--root=${project.root}`];
+    // A per-call request file handed to the backend; it is removed once the call is over.
+    let disposable = '';
     if (operation !== 'begin') option(args, 'session', input.session_id);
     option(args, 'max-chars', input.max_chars ?? (operation === 'search' ? 3000 : 4000));
     if (operation === 'begin') {
@@ -95,11 +102,14 @@ export class ProjectAdapter {
       await mkdir(path.dirname(argvPath), { recursive: true });
       await containedPath(project.root, 'build/docs/mcp/argv/git-status.json', true);
       const argv = ['git', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal'];
-      // Use a unique file per call so separate MCP processes cannot race its contents.
+      // Use a unique file per call so separate MCP processes cannot race its contents. The
+      // backend copies the argv into its own capture directory, so the request file itself is
+      // removed after the call instead of accumulating one file per query in the project.
       const uniquePath = argvPath.replace(/\.json$/, `-${process.pid}-${randomUUID()}.json`);
       await writeFile(uniquePath, JSON.stringify(argv) + '\n', { flag: 'wx' });
+      disposable = uniquePath;
       option(args, 'argv-file', path.relative(project.root, uniquePath).replaceAll('\\', '/'));
-      option(args, 'timeout', 20);
+      option(args, 'timeout', input.timeout_seconds ?? 20);
       option(args, 'max-bytes', 262144);
     } else if (operation === 'search') {
       option(args, 'kind', input.kind ?? 'docs');
@@ -127,29 +137,40 @@ export class ProjectAdapter {
       if (input.force) args.push('--force');
     }
 
-    let stdout, stderr = '', exitCode = 0;
     try {
-      ({ stdout, stderr } = await this.runner(project.python, args, {
-        cwd: project.root, shell: false, windowsHide: true, timeout: 30000,
-        maxBuffer: 2 * 1024 * 1024, encoding: 'utf8', signal,
-        env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', GIT_OPTIONAL_LOCKS: '0' },
-      }));
-    } catch (error) {
-      if (typeof error.stdout !== 'string' || !error.stdout.trim()) {
-        throw new Error(`Project query process failed (${error.code ?? error.name}).`);
+      let stdout, stderr = '', exitCode = 0;
+      try {
+        ({ stdout, stderr } = await this.runner(project.python, args, {
+          cwd: project.root, shell: false, windowsHide: true,
+          // Leave time for the backend to save its timeout receipt and captured streams.
+          timeout: operation === 'git-status' ? ((input.timeout_seconds ?? 20) + 10) * 1000 : 30000,
+          maxBuffer: 2 * 1024 * 1024, encoding: 'utf8', signal,
+          env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', GIT_OPTIONAL_LOCKS: '0' },
+        }));
+      } catch (error) {
+        if (typeof error.stdout !== 'string' || !error.stdout.trim()) {
+          if (error.code === 'ENOENT') {
+            throw new Error(`Project query process failed (ENOENT). Check Python executable ${JSON.stringify(project.python)} and the project root. Install Python 3 or set python in the project configuration to its executable name or absolute path.`);
+          }
+          throw new Error(`Project query process failed (${error.code ?? error.name}).`);
+        }
+        stdout = error.stdout;
+        stderr = error.stderr ?? '';
+        exitCode = Number.isInteger(error.code) ? error.code : 1;
       }
-      stdout = error.stdout;
-      stderr = error.stderr ?? '';
-      exitCode = Number.isInteger(error.code) ? error.code : 1;
+      let data;
+      try { data = JSON.parse(stdout); }
+      catch { throw new Error('Project backend did not return a complete JSON response.'); }
+      return {
+        project_id: project.id, observed_at: new Date().toISOString(), exit_code: exitCode,
+        backend: data, ...(stderr.trim() ? { diagnostic: stderr.trim().slice(0, 1200) } : {}),
+        ...(operation === 'begin' ? { next_step: 'Read AGENTS.md and docs/maintenance/ai/wiki-usage.md with project_read using this session; continue with the fields that response actually returned (a read/search outline with next_offset, or next_line/next_column for captured output). Reuse the session for this task.' } : {}),
+        accounting: 'Backend session budgets cover backend JSON only; this MCP envelope and transport overhead are additional.',
+      };
+    } finally {
+      // The backend reads this file while starting the command; a cancelled, timed out or failed
+      // call must still not leave request files behind in the project.
+      if (disposable) await rm(disposable, { force: true }).catch(() => {});
     }
-    let data;
-    try { data = JSON.parse(stdout); }
-    catch { throw new Error('Project backend did not return a complete JSON response.'); }
-    return {
-      project_id: project.id, observed_at: new Date().toISOString(), exit_code: exitCode,
-      backend: data, ...(stderr.trim() ? { diagnostic: stderr.trim().slice(0, 1200) } : {}),
-      ...(operation === 'begin' ? { next_step: 'Read AGENTS.md and docs/maintenance/ai/wiki-usage.md with project_read using this session; follow next_line/next_column until complete. Reuse the session for this task.' } : {}),
-      accounting: 'Backend session budgets cover backend JSON only; this MCP envelope and transport overhead are additional.',
-    };
   }
 }

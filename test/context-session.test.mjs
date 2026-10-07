@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ProjectAdapter, loadProjects } from '../src/lib/project-adapter.mjs';
+import { connectLocal, callJson } from '../src/client.mjs';
 
 // Exercises the context_session adapter against a real, if minimal, Python backend.
 // The backend records the argv it actually received, so the assertions below check the
@@ -150,6 +151,8 @@ function resolvePython() {
 
 const interpreter = resolvePython();
 const noPython = 'python is unavailable, so the context_session backend cannot be exercised';
+const defaultPython = process.platform === 'win32' ? 'python' : 'python3';
+const defaultProbe = spawnSync(defaultPython, ['--version'], { encoding: 'utf8', windowsHide: true });
 
 async function fixture(t, extra = {}) {
   const base = await realpath(os.tmpdir());
@@ -213,6 +216,37 @@ function projectOf(f) {
   assert.equal(project.adapter, 'context_session');
   return project;
 }
+
+test('a project without a Python override can begin through MCP using the platform default', {
+  skip: defaultProbe.error || defaultProbe.status !== 0 ? `${defaultPython} is unavailable` : false,
+}, async t => {
+  const f = await fixture(t);
+  await withRecord(f.record, async () => {
+    const client = await connectLocal('project', f.config);
+    try {
+      const began = await callJson(client, 'project_begin', { project_id: 'demo' });
+      assert.equal(began.exit_code, 0);
+      assert.equal(began.backend.status, 'passed');
+      assert.equal(latest(await records(f.record)).operation, 'begin');
+    } finally { await client.close(); }
+  });
+});
+
+test('an explicit missing Python executable produces a configuration hint without falling back', async t => {
+  const f = await fixture(t);
+  const executable = path.join(f.sandbox, 'missing-python');
+  await writeFile(f.config, JSON.stringify({ projects: [{ id: 'demo', root: f.root, python: executable }] }));
+  const adapter = adapterFor(await loadProjects(f.config), f.sandbox);
+  await withRecord(f.record, async () => {
+    await assert.rejects(adapter.call('begin', { project_id: 'demo' }), error => {
+      assert.match(error.message, /ENOENT/);
+      assert.ok(error.message.includes(JSON.stringify(executable)));
+      assert.match(error.message, /python.*project configuration/);
+      return true;
+    });
+    assert.deepEqual(await records(f.record), []);
+  });
+});
 
 test('auto detects the context_session backend and starts a session with profile and budget', { skip: interpreter ? false : noPython }, async t => {
   const f = await fixture(t, { python: interpreter });
@@ -299,9 +333,10 @@ test('git-status writes a fixed argv file the backend can read, and budget chang
     assert.equal(recorded.timeout, 20);
     assert.equal(recorded.max_bytes, 262144);
     assert.ok(recorded.argv_file.startsWith('build/docs/mcp/argv/git-status-'));
-    const argv = await readFile(path.join(f.root, recorded.argv_file), 'utf8');
-    assert.deepEqual(JSON.parse(argv), ['git', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal']);
+    // command is what the backend itself read out of that file during the call.
     assert.deepEqual(recorded.command, ['git', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal']);
+    // The request file is input to the call, not a result: it must not outlive it.
+    assert.deepEqual(await readdir(path.join(f.root, 'build/docs/mcp/argv')), []);
 
     await adapter.call('adjust-budget', { ...scope, budget: 24000, reason: 'the task needs another wiki pass' });
     const adjusted = latest(await records(f.record));
@@ -377,4 +412,3 @@ test('a backend that prints nothing fails without leaking an unusable result', {
     await assert.rejects(adapter.call('begin', { project_id: 'demo' }), /Project query process failed/);
   });
 });
-
