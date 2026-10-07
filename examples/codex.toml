@@ -1,6 +1,8 @@
 # Replace /absolute/path/project_wiki_server with the actual service directory.
 # On Windows, paths such as D:/Code/project_wiki_server are accepted.
-# Every environment path must be absolute: relative values would follow the MCP client's working directory.
+# PROJECT_WIKI_VAULT and PROJECT_WIKI_CONFIG must be absolute: relative values would follow
+# the MCP client's working directory. PROJECT_WIKI_STATE resolves against the service
+# directory when relative, but keep it absolute so it cannot land inside a registered project.
 [mcp_servers.knowledge]
 command = "node"
 args = ["/absolute/path/project_wiki_server/bin/project-wiki-server.mjs", "wiki"]
@@ -9,7 +11,11 @@ tool_timeout_sec = 180
 # Optional: select a specific vault instead of the default data/vault under the service directory.
 # env = { PROJECT_WIKI_VAULT = "/absolute/path/to/vault" }
 # Optional: enable legacy .doc/.ppt conversion with an installed LibreOffice.
+# On Windows use the soffice.com executable, not the soffice.exe GUI stub.
 # env = { PROJECT_WIKI_LIBREOFFICE = "/usr/bin/soffice" }
+# Optional: raise the per-source limit from the 20 MiB default (integer 1..64).
+# An out-of-range value stops the service at startup instead of being ignored.
+# env = { PROJECT_WIKI_MAX_SOURCE_MIB = "32" }
 # Optional: limit this knowledge client to query tools.
 # enabled_tools = ["wiki_read_rules", "wiki_read_index", "wiki_read_note", "wiki_search", "wiki_status", "wiki_lint", "wiki_list_sources", "wiki_read_source", "wiki_check_sources", "wiki_note_history"]
 

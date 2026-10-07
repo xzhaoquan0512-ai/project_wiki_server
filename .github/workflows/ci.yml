@@ -1,0 +1,90 @@
+# Continuous integration for project-wiki-server.
+#
+# Development happens on Windows, but the deployment target is Ubuntu Linux and the project
+# had never been exercised on Linux. Every combination therefore runs the suite on BOTH
+# ubuntu-latest and windows-latest, on the oldest supported Node.js (>= 20 per engines.node)
+# and on the current LTS.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# CI only ever reads the repository; never grant more than that.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      # Do not cancel the remaining combinations when one fails: the first Linux run is
+      # expected to surface platform-specific failures that are worth seeing in full.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: [20, 22]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      # `xlsx` is a dependency served from a SheetJS CDN tarball
+      # (https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz) rather than the npm registry,
+      # so `npm ci` needs outbound network access to cdn.sheetjs.com.
+      # `--ignore-scripts` is the documented install command (README): no package lifecycle
+      # script is allowed to run during install.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Ubuntu only: LibreOffice is what turns the legacy .doc/.ppt extractor path into real
+      # coverage. Without it the ~75s LibreOffice round-trip test in test/office.test.mjs skips.
+      # fonts-noto-cjk is required because that test round-trips Chinese text.
+      - name: Install LibreOffice (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress fonts-noto-cjk
+          # Fail here, not in the test step, if the interpreter path below is wrong.
+          /usr/bin/soffice --version
+
+      # Local prerequisite self-check for the parser and native dependencies; it exits non-zero
+      # when one is missing. It downloads no models and runs no OCR, so it is safe on both OSes.
+      - name: Doctor
+        run: npm run doctor
+
+      # test/maintenance.test.mjs skips itself on win32 because it needs Linux tar, so this step
+      # is the first-ever Linux coverage of that suite. LibreOffice is installed above, so point
+      # the office round-trip test at it: this is the only place the variable is set.
+      - name: Test (Ubuntu, with LibreOffice round-trip)
+        if: runner.os == 'Linux'
+        run: npm test
+        env:
+          PROJECT_WIKI_LIBREOFFICE_TEST: /usr/bin/soffice
+
+      # Windows has no LibreOffice in this workflow, so PROJECT_WIKI_LIBREOFFICE_TEST stays
+      # unset and the office round-trip test skips exactly as it does locally.
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: npm test
+
+      # Documented post-change check alongside `npm test`; exercises both MCP services over
+      # local stdio against the empty default vault and project registry.
+      - name: Smoke test
+        run: npm run smoke
+
+      # Linux only: bin/build-bundle.mjs produces the Linux deployment artifact and needs a
+      # Python 3 interpreter, because it writes POSIX tar modes (0644 for Node files, 0755 for
+      # shell scripts) that the platform tar cannot express. Python 3 is present on
+      # ubuntu-latest but is not guaranteed on windows-latest.
+      - name: Build deployment bundle (Ubuntu)
+        if: runner.os == 'Linux'
+        run: npm run bundle

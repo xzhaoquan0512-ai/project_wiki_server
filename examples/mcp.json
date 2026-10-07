@@ -5,7 +5,8 @@
       "args": ["/absolute/path/project_wiki_server/bin/project-wiki-server.mjs", "wiki"],
       "env": {
         "PROJECT_WIKI_VAULT": "/absolute/path/to/vault",
-        "PROJECT_WIKI_LIBREOFFICE": "/usr/bin/soffice"
+        "PROJECT_WIKI_LIBREOFFICE": "/usr/bin/soffice",
+        "PROJECT_WIKI_MAX_SOURCE_MIB": "32"
       }
     },
     "project": {

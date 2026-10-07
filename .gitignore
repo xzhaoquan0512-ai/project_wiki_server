@@ -13,6 +13,10 @@ dist/
 .wiki-server/
 *.local.json
 *.local.toml
+# Belt and braces for machine-local registries: /config/*.json only covers the config
+# directory, while these patterns also catch files copied or created elsewhere.
+*local*.json
+*local*.toml
 .env
 .env.*
 !.env.example

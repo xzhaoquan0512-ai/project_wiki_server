@@ -1,5 +1,7 @@
 # Project Wiki Server
 
+[![CI](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml/badge.svg)](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml)
+
 独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **24 个工具**，工程服务提供 **8 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
 
 ## 快速开始
@@ -288,7 +290,7 @@ test/                临时库、实际 stdio、冲突与恢复测试
 dist/                生成的干净部署包
 ```
 
-`PROJECT_WIKI_VAULT` 指定知识库，`PROJECT_WIKI_CONFIG` 指定工程注册文件，`PROJECT_WIKI_STATE` 指定通用查询会话目录，`PROJECT_WIKI_LIBREOFFICE` 指定 `soffice` 可执行文件；也可直接给启动命令传路径。**环境变量必须是绝对路径**：相对值会被拒绝，因为它会跟着 MCP 客户端的当前目录变化，而 `PROJECT_WIKI_STATE` 还必须在所有登记工程之外。未设置时默认位置固定在服务目录下（`data/vault`、`config/projects.json`）。现有空库的 AGENTS.md 不会自动覆盖；升级时可对照 templates/vault/AGENTS.md 人工合并规范。
+`PROJECT_WIKI_VAULT` 指定知识库，`PROJECT_WIKI_CONFIG` 指定工程注册文件，`PROJECT_WIKI_STATE` 指定通用查询会话目录，`PROJECT_WIKI_LIBREOFFICE` 指定 `soffice` 可执行文件，`PROJECT_WIKI_MAX_SOURCE_MIB` 指定单个原件上限（1～64 MiB，默认 20）；也可直接给启动命令传路径。**`PROJECT_WIKI_VAULT`、`PROJECT_WIKI_CONFIG` 和 `PROJECT_WIKI_LIBREOFFICE` 必须是绝对路径**：前两者含相对值会被拒绝，因为相对路径会跟着 MCP 客户端的当前目录变化；后者在提取旧格式时按绝对可执行文件校验，相对值会报错。`PROJECT_WIKI_STATE` 允许相对值，但会相对**服务目录**（而不是客户端目录）解析，配置时仍应写成绝对路径，且必须位于所有登记工程之外。`PROJECT_WIKI_MAX_SOURCE_MIB` 取 1～64 以外的整数会在启动时直接报错，不会被静默忽略。未设置时默认位置固定在服务目录下（`data/vault`、`config/projects.json`）。现有空库的 AGENTS.md 不会自动覆盖；升级时可对照 templates/vault/AGENTS.md 人工合并规范。
 
 执行 `npm run bundle` 得到 `dist/project-wiki-server.tar.gz` 和 SHA-256 文件。打包仅包含明确列出的源码、锁文件、模板及空工程配置，不包含运行资料、真实工程注册、node_modules 或凭据。归档时统一写入权限位（文件 0644、脚本 0755），因此以 root 解压也不会得到全局可写的代码。打包依赖本机 Python 3 写归档（平台 `tar` 无法指定权限模式，Windows 的 `tar.exe` 尤其如此）。
 
@@ -343,3 +345,10 @@ Linux 定时任务样例在 `deploy/maintenance/`。它们示范 ubuntu 用户�
 AI 整理由获授权的模型客户端消费队列，服务器本身不内置模型或 API 密钥。当前个人部署选择 Codex 每两小时处理至多两段；本机及应用需要可运行，服务器的扫描和备份独立执行。工程联查要同时记录源码版本、工作区变化、产物来源和观察时间，不能把旧 map 当作当前构建验证。
 
 本版兼容原有概念/实体/综合笔记布局，独立维护存储与工具，不再依赖旧 llmwiki 运行包。YAML 解析仅接受数据；PDF 使用 [PDF.js](https://mozilla.github.io/pdf.js/examples/)，OCR 使用 [Tesseract.js](https://github.com/naptha/tesseract.js)，旧 XLS 使用 [SheetJS](https://docs.sheetjs.com/)，元数据解析使用 [yaml](https://eemeli.org/yaml/)。依赖版本由锁文件固定。
+
+## 许可证
+
+服务代码以 [MIT 许可证](LICENSE) 授权，可自由使用、修改与再分发，仅需保留版权与许可声明。
+
+该许可只覆盖本仓库中的代码、模板和文档。它不覆盖任何知识库内容：`data/vault/`、运行数据、原始资料以及各工程自身的代码都不在本仓库内，也不随本许可分发。第三方依赖仍归其各自作者所有，并受各自许可证约束（见上文链接）。
+
