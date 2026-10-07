@@ -22,7 +22,7 @@ try {
   const project = await connectLocal('project', config);
   try {
     const tools = (await project.listTools()).tools;
-    assert.equal(tools.length, 8);
+    assert.equal(tools.length, 11);
     const projects = await callJson(project, 'project_list');
     assert.ok(Array.isArray(projects));
     report.checks.push({ service: 'project', tools: tools.map(tool => tool.name), registered_projects: projects.length });

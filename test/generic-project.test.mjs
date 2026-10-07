@@ -194,7 +194,7 @@ test('MCP advertises generic capabilities and supports persisted scoped continua
   const listing = JSON.parse((await client.callTool({ name: 'project_list', arguments: {} })).content[0].text);
   assert.equal(listing[0].adapter, 'generic');
   assert.ok(listing[0].capabilities.unsupported_selectors.includes('pointer'));
-  assert.equal((await client.listTools()).tools.length, 8);
+  assert.equal((await client.listTools()).tools.length, 11);
   const started = JSON.parse((await client.callTool({ name: 'project_begin', arguments: { project_id: 'demo' } })).content[0].text);
   const response = await client.callTool({ name: 'project_read', arguments: { project_id: 'demo', session_id: started.backend.session_id, path: 'AGENTS.md', section: 'rules' } });
   assert.equal(response.isError, true);

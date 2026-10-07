@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml/badge.svg)](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml)
 
-独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **25 个工具**，工程服务提供 **8 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
+独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **25 个工具**，工程服务提供 **11 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
 
 ## 快速开始
 
@@ -213,7 +213,7 @@ ssh -N -L 8790:127.0.0.1:8790 <user>@<host>
 
 `deploy/ssh/start-panel.sh` 与 MCP 启动脚本同样读取 `PROJECT_WIKI_NODE`、`PROJECT_WIKI_VAULT`、`PROJECT_WIKI_PANEL_HOST`、`PROJECT_WIKI_PANEL_PORT`，默认 `127.0.0.1:8790`；只有显式设置 `PROJECT_WIKI_PANEL_ALLOW_REMOTE=1` 才会绑定非回环地址，模板 unit 不设置它。面板与 MCP 进程各自独立，互不依赖。
 
-## 工程工具：8 个
+## 工程工具：11 个
 
 | 工具 | 用途 |
 | --- | --- |
@@ -225,6 +225,13 @@ ssh -N -L 8790:127.0.0.1:8790 <user>@<host>
 | `project_git_status` | 固定参数读取 Git 分支、提交和工作区变化 |
 | `project_session_status` | 查看会话用量及继续查询的信息 |
 | `project_adjust_budget` | 带原因调整原会话预算，保留累计用量 |
+| `project_help` | 在会话内读取后端自己的子命令帮助（有界、计控制输出） |
+| `project_workset` | 按**工程内** JSON spec 让后端组装工作集；服务只校验路径不越界，不读取或解释 spec |
+| `project_recall` | 按本次会话返回过的回执编号（`OBS-段-序号`）重读该次观察 |
+
+`project_help`、`project_workset`、`project_recall` 只存在于 `context_session` 适配器：它们驱动目标工程后端自己的 `help`/`workset`/`recall` 子命令，`project_list.capabilities.operations` 会列出实际支持的操作，普通 `generic` 工程会明确拒绝。回执重读不等于重新验证——它取回的是当时记录的观察，而不是当前事实。
+
+源码检索的覆盖范围由适配器说明，不从服务层猜测：`generic` 做大小写不敏感的字面检索（覆盖允许的源码与文档、`wiki/` 与 `docs/wiki/`），已知路径的源码用 `project_read`；`context_session` 的 `kind` 只有 `docs`/`wiki` 两种，实际覆盖取决于目标工程自己的文档索引。服务只转发后端 CLI 真正接受的参数——例如后端内部声明但 CLI 未定义 flag 的 `record_type` 不会被透传，以免真实调用因未知参数直接失败。
 
 ### 接入普通工程
 

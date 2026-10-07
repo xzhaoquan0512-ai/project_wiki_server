@@ -52,6 +52,8 @@ export class ProjectAdapter {
   capabilities(project) {
     return project.adapter === 'generic' ? genericCapabilities : {
       backend: 'context_session.py', selectors: ['path', 'id', 'section', 'pointer', 'lines', 'command_index', 'stream'],
+      operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'help', 'workset', 'recall'],
+      search: 'kind docs|wiki exactly as the backend defines them; the service forwards no selector the backend CLI does not accept, so source-code coverage follows the backend index rather than this service',
       session_storage: 'project backend query cache', freshness: 'preserves backend freshness and confidence',
     };
   }
@@ -64,7 +66,7 @@ export class ProjectAdapter {
 
   async call(operation, input, signal) {
     const project = this.project(input.project_id);
-    const allowed = ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status'];
+    const allowed = ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'help', 'workset', 'recall'];
     if (!allowed.includes(operation)) throw new Error('Unsupported operation.');
     if (operation === 'git-status' && input.timeout_seconds !== undefined &&
         (!Number.isInteger(input.timeout_seconds) || input.timeout_seconds < 1 || input.timeout_seconds > 120)) {
@@ -111,6 +113,30 @@ export class ProjectAdapter {
       option(args, 'argv-file', path.relative(project.root, uniquePath).replaceAll('\\', '/'));
       option(args, 'timeout', input.timeout_seconds ?? 20);
       option(args, 'max-bytes', 262144);
+    } else if (operation === 'help') {
+      option(args, 'command', input.command);
+      option(args, 'offset', input.offset);
+      option(args, 'limit', input.limit);
+      option(args, 'format', input.format);
+    } else if (operation === 'workset') {
+      // The spec is a JSON file inside the project: the backend reads it, this service only
+      // checks that an existing path cannot escape the registered root.
+      try { await containedPath(project.root, input.spec); }
+      catch (error) {
+        if (error.code === 'ENOENT') throw new Error('The workset spec must be an existing repository-relative JSON file.');
+        throw error;
+      }
+      option(args, 'spec', relativePath(input.spec));
+      for (const key of input.keys ?? []) option(args, 'key', key);
+      if (input.force) args.push('--force');
+    } else if (operation === 'recall') {
+      option(args, 'receipt', input.receipt);
+      option(args, 'pointer', input.pointer);
+      for (const [field, flag] of Object.entries({
+        start_line: 'start-line', end_line: 'end-line', start_column: 'start-column',
+        offset: 'offset', limit: 'limit', format: 'format',
+      })) option(args, flag, input[field]);
+      if (input.force) args.push('--force');
     } else if (operation === 'search') {
       option(args, 'kind', input.kind ?? 'docs');
       option(args, 'query', input.query);

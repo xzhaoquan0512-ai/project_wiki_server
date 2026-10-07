@@ -181,11 +181,11 @@ test('project MCP discovers only scoped query tools and refuses invalid file sel
   const client = await connect(t, createProjectServer(new Map([['project', { id: 'project', root, script: 'unused.py', python: 'unused' }]])));
   const tools = (await client.listTools()).tools;
   const names = tools.map(tool => tool.name);
-  assert.equal(names.length, 8);
+  assert.equal(names.length, 11);
   assert.ok(!names.some(name => /write|shell|execute/.test(name)));
   // Every tool states its behaviour, and the two calls that create or resize a session are not
   // advertised as reads; the query tools are, the same way knowledge reads are annotated.
-  const readOnly = new Set(['project_list', 'project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_session_status']);
+  const readOnly = new Set(['project_list', 'project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_session_status', 'project_help', 'project_workset', 'project_recall']);
   for (const tool of tools) {
     assert.ok(tool.annotations, `${tool.name} has no annotations`);
     assert.equal(tool.annotations.readOnlyHint, readOnly.has(tool.name), `${tool.name} readOnlyHint`);
@@ -272,6 +272,51 @@ test('index status reports recorded compilation progress instead of a fixed pend
     assert.match(entry.compilation_scope, /recorded progress/);
     assert.equal(entry.compilation_checked_notes, 0);
   } finally { await client.close(); }
+});
+
+test('help, workset and recall drive the backend and refuse what the adapter cannot honour', async t => {
+  const root = await fixture(t);
+  const projectRoot = path.join(root, 'project');
+  await mkdir(projectRoot, { recursive: true });
+  const calls = [];
+  const runner = async (executable, args) => { calls.push({ executable, args }); return { stdout: JSON.stringify({ status: 'passed', session: 'CTX-1' }), stderr: '' }; };
+  const client = await connect(t, createProjectServer(new Map([['demo', { id: 'demo', root: projectRoot, adapter: 'context_session', script: 'backend.py', python: 'python' }]]), { runner }));
+  const scope = { project_id: 'demo', session_id: 'CTX-1' };
+  await mkdir(path.join(projectRoot, 'tools'), { recursive: true });
+  await writeFile(path.join(projectRoot, 'tools', 'workset.json'), '{"goal":"fixture"}\n');
+
+  const help = await client.callTool({ name: 'project_help', arguments: { ...scope, command: 'search', format: 'blocks' } });
+  assert.ok(!help.isError, help.content[0].text);
+  assert.ok(calls.at(-1).args.includes('--command=search'));
+  assert.ok(calls.at(-1).args.includes('--format=blocks'));
+
+  const workset = await client.callTool({ name: 'project_workset', arguments: { ...scope, spec: 'tools/workset.json', keys: ['SRC-1'] } });
+  assert.ok(!workset.isError, workset.content[0].text);
+  assert.ok(calls.at(-1).args.includes('--spec=tools/workset.json'));
+  assert.ok(calls.at(-1).args.includes('--key=SRC-1'));
+  // A spec that is not there yet is refused before any backend process starts.
+  const missing = await client.callTool({ name: 'project_workset', arguments: { ...scope, spec: 'tools/absent.json' } });
+  assert.equal(missing.isError, true);
+  assert.match(missing.content[0].text, /existing repository-relative JSON file/);
+
+  const recall = await client.callTool({ name: 'project_recall', arguments: { ...scope, receipt: 'OBS-1-2', pointer: '/result' } });
+  assert.ok(!recall.isError, recall.content[0].text);
+  assert.ok(calls.at(-1).args.includes('--receipt=OBS-1-2'));
+
+  // The spec must stay inside the project, and a receipt must look like one this backend issues.
+  const before = calls.length;
+  const escaped = await client.callTool({ name: 'project_workset', arguments: { ...scope, spec: '../outside.json' } });
+  assert.equal(escaped.isError, true);
+  const badReceipt = await client.callTool({ name: 'project_recall', arguments: { ...scope, receipt: 'receipt-1' } });
+  assert.equal(badReceipt.isError, true);
+  assert.equal(calls.length, before, 'no backend process may start for a refused request');
+
+  // A generic project has no such backend commands, and says so instead of pretending.
+  const generic = await connect(t, createProjectServer(new Map([['plain', { id: 'plain', root: projectRoot, adapter: 'generic' }]]), { stateDirectory: path.join(root, 'state') }));
+  const began = JSON.parse((await generic.callTool({ name: 'project_begin', arguments: { project_id: 'plain' } })).content[0].text);
+  const refused = await generic.callTool({ name: 'project_recall', arguments: { project_id: 'plain', session_id: began.backend.session_id, receipt: 'OBS-1-1' } });
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /generic adapter/);
 });
 
 test('knowledge MCP serves rules, maintains links/index/log and preserves raw source', async t => {

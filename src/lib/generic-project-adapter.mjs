@@ -22,6 +22,7 @@ const now = () => new Date().toISOString();
 
 export const genericCapabilities = Object.freeze({
   backend: 'generic', selectors: ['path', 'start_line', 'end_line', 'start_column', 'offset', 'snapshot_id', 'expected_hash'],
+  operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status'],
   search: 'case-insensitive literal search over permitted UTF-8 text; docs searches source and docs, wiki searches wiki/ and docs/wiki/',
   unsupported_selectors: ['id', 'section', 'pointer', 'force', 'command_index', 'stream', 'include_stale', 'include_views'],
   session_storage: 'service data/project-sessions or PROJECT_WIKI_STATE; project sources stay unchanged',
@@ -258,7 +259,7 @@ export class GenericProjectAdapter {
         return { status: 'passed', snapshot_id: snapshotId, source: state.snapshots[snapshotId].source, content: stdout, start_offset: 0, range_end: stdout.length, freshness: 'Fresh command output; not an atomic project snapshot and not a test result.' };
       } catch (error) { throw new Error(`Git status unavailable (${error.code ?? error.name}); the directory may not be a Git repository.`); }
     }
-    throw new Error('Unsupported operation.');
+    throw new Error(`Unsupported operation for the generic adapter: ${operation}. Supported: begin, search, read, evidence, status, adjust-budget, git-status. help, workset and recall come from a project that ships tools/docs/context_session.py.`);
   }
 
   async #read(project, operation, input, state) {

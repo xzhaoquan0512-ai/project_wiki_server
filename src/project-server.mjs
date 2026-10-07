@@ -21,7 +21,7 @@ export function createProjectServer(projects, options = {}) {
   // Creating a session and resizing its budget change session state; the query tools only read
   // project content, leaving the backend's own receipts and caches aside, the same convention the
   // knowledge tools already follow for reads that populate an extraction cache.
-  const readOnly = new Set(['project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_session_status']);
+  const readOnly = new Set(['project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_session_status', 'project_help', 'project_workset', 'project_recall']);
   const register = (name, description, inputSchema, operation) => {
     server.registerTool(name, {
       description, inputSchema: z.object(inputSchema).strict(),
@@ -56,6 +56,16 @@ export function createProjectServer(projects, options = {}) {
     ...session, ...limit, timeout_seconds: z.number().int().min(1).max(120).optional(),
   }, 'git-status');
   register('project_session_status', 'Read query session usage and continuation state. This is not project completion or hardware health.', { ...session, ...limit }, 'status');
+  register('project_help', 'Read the project backend\'s own bounded help for one of its subcommands inside this session, instead of guessing the protocol from the outside. Counts as session control output; it does not run the command it describes.', {
+    ...session, command: z.string().min(1).max(60).optional(), ...paging, format: z.enum(['rows', 'blocks']).optional(), ...limit,
+  }, 'help');
+  register('project_workset', 'Ask the context_session backend to assemble a workset from a JSON spec that already lives inside the project. The service only checks that the spec path stays inside the project root; it does not read or interpret the spec, and keys select additional evidence.', {
+    ...session, spec: z.string().min(1).max(4096), keys: z.array(z.string().min(1).max(160)).max(50).optional(), force: z.boolean().optional(), ...limit,
+  }, 'workset');
+  register('project_recall', 'Re-read one observation this session actually returned, by its receipt id. Historical observations are not current evidence unless the backend says so; re-reading does not rerun the recorded check.', {
+    ...session, receipt: z.string().regex(/^OBS-[0-9]+-[0-9]+$/), pointer: z.string().min(1).max(500).optional(),
+    ...lines, ...paging, format: z.enum(['rows', 'blocks']).optional(), force: z.boolean().optional(), ...limit,
+  }, 'recall');
   register('project_adjust_budget', 'Adjust the existing session budget with a concrete reason, retaining accumulated usage and receipts. Does not reset conversation or session history.', {
     ...session, budget: z.number().int().min(8000).max(512000), reason: z.string().min(10).max(1000), ...limit,
   }, 'adjust-budget');

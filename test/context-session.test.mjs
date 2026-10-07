@@ -23,7 +23,7 @@ from pathlib import Path
 def build():
     parser = argparse.ArgumentParser(prog='context_session.py')
     parser.add_argument('--root', type=Path)
-    names = ('begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'run', 'help')
+    names = ('begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'run', 'help', 'workset', 'recall')
     sub = parser.add_subparsers(dest='operation', required=True)
     for name in names:
         child = sub.add_parser(name)
@@ -56,6 +56,11 @@ def build():
         child.add_argument('--argv-file')
         child.add_argument('--timeout', type=float)
         child.add_argument('--max-bytes', type=int)
+        child.add_argument('--command')
+        child.add_argument('--spec')
+        child.add_argument('--key', action='append')
+        child.add_argument('--receipt')
+        child.add_argument('--format')
     return parser
 
 def main():
@@ -104,6 +109,12 @@ def main():
         'argv_file': options.argv_file,
         'timeout': options.timeout,
         'max_bytes': options.max_bytes,
+        # 'command' is already the argv-file array below, so the help selector needs its own key.
+        'help_command': options.command,
+        'spec': options.spec,
+        'keys': options.key,
+        'receipt': options.receipt,
+        'format': options.format,
         'argv': argv,
         'unknown': unknown,
         'command': command,
@@ -346,6 +357,43 @@ test('git-status writes a fixed argv file the backend can read, and budget chang
   });
 });
 
+test('help, workset and recall reach the backend with the documented flags', { skip: interpreter ? false : noPython }, async t => {
+  const f = await fixture(t, { python: interpreter });
+  const adapter = adapterFor(f.projects, f.sandbox);
+  const scope = { project_id: 'demo', session_id: 'CTX-fixture-1' };
+  await mkdir(path.join(f.root, 'tools/docs'), { recursive: true });
+  await writeFile(path.join(f.root, 'tools/docs/workset.json'), '{"goal":"fixture"}\n');
+  await withRecord(f.record, async () => {
+    await adapter.call('help', { ...scope, command: 'search', offset: 2, limit: 4, format: 'blocks' });
+    const help = latest(await records(f.record));
+    assert.equal(help.operation, 'help');
+    assert.equal(help.help_command, 'search');
+    assert.equal(help.offset, 2);
+    assert.equal(help.limit, 4);
+    assert.equal(help.format, 'blocks');
+    assert.ok(help.argv.includes('--session=CTX-fixture-1'));
+
+    await adapter.call('workset', { ...scope, spec: 'tools/docs/workset.json', keys: ['SRC-1', 'SRC-2'], force: true });
+    const workset = latest(await records(f.record));
+    assert.equal(workset.operation, 'workset');
+    assert.equal(workset.spec, 'tools/docs/workset.json');
+    assert.deepEqual(workset.keys, ['SRC-1', 'SRC-2']);
+    assert.equal(workset.force, true);
+
+    await adapter.call('recall', { ...scope, receipt: 'OBS-2-7', pointer: '/result/blocks/0/text', start_line: 3, end_line: 9, start_column: 2, limit: 5, format: 'rows', force: true });
+    const recall = latest(await records(f.record));
+    assert.equal(recall.operation, 'recall');
+    assert.equal(recall.receipt, 'OBS-2-7');
+    assert.equal(recall.pointer, '/result/blocks/0/text');
+    assert.equal(recall.start_line, 3);
+    assert.equal(recall.end_line, 9);
+    assert.equal(recall.start_column, 2);
+    assert.equal(recall.limit, 5);
+    assert.equal(recall.format, 'rows');
+    assert.equal(recall.force, true);
+  });
+});
+
 test('the adapter rejects selectors and paths the backend never asked for', { skip: interpreter ? false : noPython }, async t => {
   const f = await fixture(t, { python: interpreter });
   const adapter = adapterFor(f.projects, f.sandbox);
@@ -359,6 +407,8 @@ test('the adapter rejects selectors and paths the backend never asked for', { sk
     await assert.rejects(adapter.call('search', { ...scope, query: 'x', snapshot_id: 'SNAP-1' }), /only by the generic adapter/);
     await assert.rejects(adapter.call('read', { ...scope, path: 'a.md', expected_hash: 'a'.repeat(64) }), /only by the generic adapter/);
     await assert.rejects(adapter.call('search', { project_id: 'demo', session_id: '../bad', query: 'x' }), /valid session_id/);
+    await assert.rejects(adapter.call('workset', { ...scope, spec: '../../outside.json' }), /inside the registered project/);
+    await assert.rejects(adapter.call('workset', { ...scope, spec: 'C:/Windows/system32/config.json' }), /repository-relative path/);
     await assert.rejects(adapter.call('search', { project_id: 'missing', session_id: 'CTX-fixture-1', query: 'x' }), /Unknown project_id/);
     assert.deepEqual(await records(f.record), []);
   });
