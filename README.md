@@ -16,7 +16,7 @@ npm test
 npm run smoke
 ```
 
-`init:vault` 只创建新库，目标存在时拒绝覆盖。当前交付目录已经初始化，可直接执行 `npm run smoke`；解压干净部署包后再执行完整步骤。
+`init:vault` 只创建新库，目标存在时拒绝覆盖。当前交付目录已经初始化，可直接执行 `npm test` 和 `npm run smoke`；**新克隆的仓库没有 `data/`（它被 `.gitignore` 排除），必须先执行 `npm run init:vault`**，否则 `npm test` 和 `npm run smoke` 会因找不到默认库而报 `ENOENT`。解压干净部署包后再执行完整步骤，CI 也按这个顺序执行。
 
 `doctor` 检查本机解析库、图片原生模块及随依赖安装的中英文 OCR 模型，不进行 OCR、不下载模型、不转换文档。缺少可选 LibreOffice 不影响其他格式；`npm run doctor -- --require-legacy` 则要求旧版 Word/PowerPoint 的转换程序可用。
 
@@ -339,6 +339,15 @@ PDF 索引按原件 SHA-256 分代保存至 `.wiki-server/fulltext/`，逐页校
 PDF 整理任务为连续 20 页，其他格式按来源建立任务。`summarized` 仅表示调用者已完成该范围的草稿笔记；`needs_review` 保留不确定性。记录时检查来源、笔记引用及笔记版本，服务不替调用者理解原文。`wiki_compile_queue` 是语义整理进度入口，引用计数和索引覆盖均不可替代它。
 
 Linux 定时任务样例在 `deploy/maintenance/`。它们示范 ubuntu 用户、固定安装路径、北京时间每 15 分钟扫描和每日 03:15 备份，部署前须调整到真实用户与目录，并创建 incoming、backup、维护锁目录。安装后通过 systemd 检查实际运行结果，不把 timer 启用当成任务成功。
+
+Windows 没有随仓库提供的定时任务，需要自行登记计划任务。`maintain-vault.mjs backup` **只支持 Linux**（它依赖 Linux `tar`），在 Windows 上只能手动执行 `index-sources.mjs` 和 `maintain-vault.mjs scan`，备份请另择方式，并把 vault 整体（含隐藏的 `.wiki-server/`）一起保存：
+
+```powershell
+# 每 15 分钟扫描 incoming 并重建全文索引；路径与 MAX_SOURCE_MIB 按实际部署调整
+$vault = 'D:\Data\wiki-vault'; $incoming = 'D:\Data\wiki-incoming'
+$env:PROJECT_WIKI_MAX_SOURCE_MIB = '32'
+Start-Process -Wait -NoNewWindow node -ArgumentList 'bin\maintain-vault.mjs','scan',$vault,$incoming
+```
 
 备份在写锁内先做快照，再压缩并解压到独立临时目录逐文件校验；包含原件、笔记、历史、登记、事务和整理记录，排除运行锁及可重建的全文/提取缓存。保留最近 14 份已验证自动备份，再补最近 8 个周区间各一份；不清理人工命名的备份。恢复时使用新的空目录，校验清单、重建缓存、确认后切换服务。异机备份另由操作者或客户端拉取并核对 SHA-256。
 

@@ -45,6 +45,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      # data/ is never committed (see .gitignore), so a fresh clone has no default vault and
+      # both `npm test` and `npm run smoke` would fail with ENOENT ... data/vault. This is the
+      # first step of the documented quick start and `init-vault` refuses to overwrite, so it
+      # is safe to keep in front of every test run.
+      - name: Initialize the default vault
+        run: npm run init:vault
+
       # Ubuntu only: LibreOffice is what turns the legacy .doc/.ppt extractor path into real
       # coverage. Without it the ~75s LibreOffice round-trip test in test/office.test.mjs skips.
       # fonts-noto-cjk is required because that test round-trips Chinese text.
@@ -64,20 +71,17 @@ jobs:
       # test/maintenance.test.mjs skips itself on win32 because it needs Linux tar, so this step
       # is the first-ever Linux coverage of that suite. LibreOffice is installed above, so point
       # the office round-trip test at it: this is the only place the variable is set.
-      - name: Test (Ubuntu, with LibreOffice round-trip)
-        if: runner.os == 'Linux'
+      - name: Test
         run: npm test
         env:
+          # Ubuntu installs LibreOffice above, so the ~75s legacy .doc/.ppt round-trip test in
+          # test/office.test.mjs runs instead of skipping. Windows has no LibreOffice in this
+          # workflow, where the same variable points at a path that does not exist and the test
+          # skips exactly as it does locally.
           PROJECT_WIKI_LIBREOFFICE_TEST: /usr/bin/soffice
 
-      # Windows has no LibreOffice in this workflow, so PROJECT_WIKI_LIBREOFFICE_TEST stays
-      # unset and the office round-trip test skips exactly as it does locally.
-      - name: Test (Windows)
-        if: runner.os == 'Windows'
-        run: npm test
-
       # Documented post-change check alongside `npm test`; exercises both MCP services over
-      # local stdio against the empty default vault and project registry.
+      # local stdio against the freshly initialized default vault and empty project registry.
       - name: Smoke test
         run: npm run smoke
 
