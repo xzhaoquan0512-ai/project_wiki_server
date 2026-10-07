@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml/badge.svg)](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml)
 
-独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **25 个工具**，工程服务提供 **12 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
+独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **26 个工具**，工程服务提供 **12 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
 
 ## 快速开始
 
@@ -27,12 +27,13 @@ node bin/project-wiki-server.mjs project
 
 这两条命令分别通过 stdio 等待 MCP 请求。客户端模板见 [Codex TOML](examples/codex.toml) 和 [通用 MCP JSON](examples/mcp.json)。执行 `npm run tools` 可通过真实 MCP 工具发现查看完整参数；该命令使用临时库，不改正式数据。`npm run panel` 另外启动本地管理面板（只读视图，见下文），不影响这两个 MCP 进程。
 
-## 知识工具：25 个
+## 知识工具：26 个
 
 | 工具 | 用途 |
 | --- | --- |
 | `wiki_read_rules` | 读取知识整理规范；另提供 `wiki://rules` 资源 |
 | `wiki_read_log` | 读取审计日志 `wiki/log.md` 的尾部（默认 200 行、上限 2000 行）；日志记录服务做过什么，不等于结果已独立验证 |
+| `wiki_ops_status` | 只读运维快照：写锁归属与待恢复事务数、抽取依赖就绪情况、全文索引覆盖、已登记的整理计数；不取锁、不跑 OCR/转换、不下载、不重放事务、也无法报告库外的备份 |
 | `wiki_read_index` | 查看当前知识目录，默认隐藏归档笔记 |
 | `wiki_search` | 检索标题、别名、标签、摘要和正文 |
 | `wiki_read_note` | 读取笔记、出处、关联、反链和当前 `revision` |

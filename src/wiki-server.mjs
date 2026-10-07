@@ -11,6 +11,7 @@ import { MAX_IMPORT_MESSAGE_BYTES } from './lib/source-limits.mjs';
 import { FulltextStore } from './lib/fulltext-store.mjs';
 import { CompilationStore, compilationProgress } from './lib/compilation-store.mjs';
 import { readLogTail, LOG_LINES_MAX } from './lib/vault-log.mjs';
+import { opsStatus } from './lib/ops-status.mjs';
 
 export function createWikiTransport() {
   return new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: MAX_IMPORT_MESSAGE_BYTES });
@@ -103,6 +104,7 @@ export async function createWikiServer(vaultPath) {
   register('wiki_read_log', 'Read the tail of the vault audit log (wiki/log.md). Every note mutation and wiki_append_log appends to it, so this is how a client sees what the service did without opening the vault. Entries record operations, not independent verification of their result.', {
     lines: z.number().int().min(1).max(LOG_LINES_MAX).optional(),
   }, ({ lines }) => readLogTail(root, { lines: lines ?? undefined }));
+  register('wiki_ops_status', 'Read one operations snapshot: vault write-lock ownership and pending transactions, extraction dependency readiness, fulltext index coverage and recorded compilation counts. It takes no lock, runs no OCR or conversion, downloads nothing, replays no transaction, and cannot report backups that live outside the vault.', {}, () => opsStatus(root));
   server.registerResource('wiki_rules', 'wiki://rules', { mimeType: 'text/markdown', description: 'Knowledge organization and maintenance rules.' }, async uri => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: await rules() }] }));
   register('wiki_note_history', 'List saved versions; pass revision to read one version. Deleted notes require their original exact wiki/.../*.md path. History begins at the first server-managed mutation. The version list pages with offset/limit; one revision is bounded by max_chars/offset.', {
     pathOrTitle: identifier, revision: digest.optional(),

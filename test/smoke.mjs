@@ -10,8 +10,8 @@ try {
   const wiki = await connectLocal('wiki', vault);
   try {
     const tools = (await wiki.listTools()).tools;
-    assert.equal(tools.length, 25);
-    for (const name of ['wiki_read_source', 'wiki_check_sources', 'wiki_note_history', 'wiki_restore_note', 'wiki_rename_note', 'wiki_merge_notes', 'wiki_archive_note', 'wiki_rebuild_index', 'wiki_read_log']) {
+    assert.equal(tools.length, 26);
+    for (const name of ['wiki_read_source', 'wiki_check_sources', 'wiki_note_history', 'wiki_restore_note', 'wiki_rename_note', 'wiki_merge_notes', 'wiki_archive_note', 'wiki_rebuild_index', 'wiki_read_log', 'wiki_ops_status']) {
       assert.ok(tools.some(tool => tool.name === name), `Missing knowledge tool: ${name}`);
     }
     const rules = await wiki.readResource({ uri: 'wiki://rules' });

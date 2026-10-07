@@ -380,6 +380,39 @@ test('git history uses one fixed template per mode and never lets a caller add f
   assert.match(JSON.parse(genericLog.content[0].text).backend.content, /commit abc/);
 });
 
+test('one read-only operations view answers while a writer holds the vault lock', async t => {
+  const root = await fixture(t);
+  await mkdir(path.join(root, 'wiki', 'concepts'), { recursive: true });
+  await mkdir(path.join(root, 'raw'));
+  await writeFile(path.join(root, 'AGENTS.md'), '# Rules\nFixture only.\n');
+  const client = await connect(t, await createWikiServer(root));
+  const call = async (name, args) => JSON.parse((await client.callTool({ name, arguments: args })).content[0].text);
+  try {
+    const clean = await call('wiki_ops_status', {});
+    assert.equal(clean.vault.locked, false);
+    assert.equal(clean.vault.pending_transactions, 0);
+    assert.equal(typeof clean.extraction.ready, 'boolean');
+    assert.ok(Array.isArray(clean.extraction.unavailable));
+    assert.equal(clean.fulltext.sources, 0);
+    assert.equal(clean.compilation.recorded_tasks, 0);
+    assert.ok(clean.notes.some(note => /no OCR/.test(note)), 'the view must state what it did not do');
+
+    // A foreign writer must not stop the view: it takes no lock, replays nothing and runs no OCR.
+    const lock = path.join(root, '.wiki-server/write.lock');
+    await mkdir(lock, { recursive: true });
+    await writeFile(path.join(lock, 'owner.json'), JSON.stringify({ token: 'foreign', pid: 999999, hostname: 'elsewhere', started_at: new Date().toISOString() }));
+    const journal = path.join(root, '.wiki-server', 'transactions', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.json');
+    await mkdir(path.dirname(journal), { recursive: true });
+    await writeFile(journal, JSON.stringify({ version: 1, status: 'pending', writes: [] }));
+    const held = await call('wiki_ops_status', {});
+    assert.equal(held.vault.locked, true);
+    assert.equal(held.vault.owner.hostname, 'elsewhere');
+    assert.equal(held.vault.pending_transactions, 1);
+    assert.deepEqual(await readdir(path.join(root, '.wiki-server', 'transactions')), ['aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.json'],
+      'the view must count the journal without replaying it');
+  } finally { await client.close(); }
+});
+
 test('knowledge MCP serves rules, maintains links/index/log and preserves raw source', async t => {
   const root = await fixture(t);
   await mkdir(path.join(root, 'wiki', 'concepts'), { recursive: true });
@@ -389,7 +422,7 @@ test('knowledge MCP serves rules, maintains links/index/log and preserves raw so
   await writeFile(path.join(root, 'wiki', 'index.md'), '# Wiki Index\n');
   await writeFile(path.join(root, 'wiki', 'concepts', 'Seed.md'), '---\ntitle: Seed\ntype: concept\nsources: [raw/source.md]\n---\n# Seed\nRelated [[Child]].\n');
   const client = await connect(t, await createWikiServer(root));
-  assert.equal((await client.listTools()).tools.length, 25);
+  assert.equal((await client.listTools()).tools.length, 26);
   assert.match((await client.readResource({ uri: 'wiki://rules' })).contents[0].text, /immutable/);
   const registered = await client.callTool({ name: 'wiki_register_source', arguments: { path: 'raw/source.md' } });
   assert.notEqual(registered.isError, true);
