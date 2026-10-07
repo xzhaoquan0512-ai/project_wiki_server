@@ -21,7 +21,7 @@ export function createProjectServer(projects, options = {}) {
   // Creating a session and resizing its budget change session state; the query tools only read
   // project content, leaving the backend's own receipts and caches aside, the same convention the
   // knowledge tools already follow for reads that populate an extraction cache.
-  const readOnly = new Set(['project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_session_status', 'project_help', 'project_workset', 'project_recall']);
+  const readOnly = new Set(['project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_git_history', 'project_session_status', 'project_help', 'project_workset', 'project_recall']);
   const register = (name, description, inputSchema, operation) => {
     server.registerTool(name, {
       description, inputSchema: z.object(inputSchema).strict(),
@@ -55,6 +55,12 @@ export function createProjectServer(projects, options = {}) {
   register('project_git_status', 'Capture a fresh, fixed read-only git status command through the project session. Reports current commit/branch and working-tree changes; it does not validate code or run tests. timeout_seconds defaults to 20; slow mounted projects may need up to 120. The client request timeout must exceed timeout_seconds plus the 10 seconds the service reserves to save the timeout receipt.', {
     ...session, ...limit, timeout_seconds: z.number().int().min(1).max(120).optional(),
   }, 'git-status');
+  register('project_git_history', 'Read repository history through one fixed read-only Git subcommand: diff (optionally against one ref), log (bounded by entries, optionally one ref) or show (one ref, HEAD by default). One revision and at most one in-project path may be given; ranges, extra flags and external diff drivers are refused. Captures stop at max_bytes and report capture_status output_limit instead of truncating silently - narrow the request with ref/path, or read the saved capture with project_read. History explains changes; it is not a verification result.', {
+    ...session, mode: z.enum(['diff', 'log', 'show']), ref: z.string().min(1).max(120).optional(),
+    path: z.string().min(1).max(2048).optional(), entries: z.number().int().min(1).max(200).optional(),
+    max_bytes: z.number().int().min(65_536).max(1_048_576).optional(),
+    timeout_seconds: z.number().int().min(1).max(120).optional(), ...limit,
+  }, 'git-history');
   register('project_session_status', 'Read query session usage and continuation state. This is not project completion or hardware health.', { ...session, ...limit }, 'status');
   register('project_help', 'Read the project backend\'s own bounded help for one of its subcommands inside this session, instead of guessing the protocol from the outside. Counts as session control output; it does not run the command it describes.', {
     ...session, command: z.string().min(1).max(60).optional(), ...paging, format: z.enum(['rows', 'blocks']).optional(), ...limit,

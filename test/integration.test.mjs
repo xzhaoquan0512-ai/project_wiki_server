@@ -181,11 +181,11 @@ test('project MCP discovers only scoped query tools and refuses invalid file sel
   const client = await connect(t, createProjectServer(new Map([['project', { id: 'project', root, script: 'unused.py', python: 'unused' }]])));
   const tools = (await client.listTools()).tools;
   const names = tools.map(tool => tool.name);
-  assert.equal(names.length, 11);
+  assert.equal(names.length, 12);
   assert.ok(!names.some(name => /write|shell|execute/.test(name)));
   // Every tool states its behaviour, and the two calls that create or resize a session are not
   // advertised as reads; the query tools are, the same way knowledge reads are annotated.
-  const readOnly = new Set(['project_list', 'project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_session_status', 'project_help', 'project_workset', 'project_recall']);
+  const readOnly = new Set(['project_list', 'project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_git_history', 'project_session_status', 'project_help', 'project_workset', 'project_recall']);
   for (const tool of tools) {
     assert.ok(tool.annotations, `${tool.name} has no annotations`);
     assert.equal(tool.annotations.readOnlyHint, readOnly.has(tool.name), `${tool.name} readOnlyHint`);
@@ -317,6 +317,67 @@ test('help, workset and recall drive the backend and refuse what the adapter can
   const refused = await generic.callTool({ name: 'project_recall', arguments: { project_id: 'plain', session_id: began.backend.session_id, receipt: 'OBS-1-1' } });
   assert.equal(refused.isError, true);
   assert.match(refused.content[0].text, /generic adapter/);
+});
+
+test('git history uses one fixed template per mode and never lets a caller add flags', async t => {
+  const root = await fixture(t);
+  const projectRoot = path.join(root, 'project');
+  await mkdir(path.join(projectRoot, 'docs'), { recursive: true });
+  await writeFile(path.join(projectRoot, 'docs', 'note.md'), 'tracked\n');
+
+  // context_session: the adapter hands the backend one argv file and removes it afterwards.
+  const backendCalls = [];
+  const backend = await connect(t, createProjectServer(new Map([['demo', { id: 'demo', root: projectRoot, adapter: 'context_session', script: 'backend.py', python: 'python' }]]), {
+    runner: async (executable, args) => {
+      const file = args.find(value => value.startsWith('--argv-file=')).slice('--argv-file='.length);
+      backendCalls.push({ args, argv: JSON.parse(await readFile(path.join(projectRoot, file), 'utf8')) });
+      return { stdout: JSON.stringify({ status: 'passed', session: 'CTX-1' }), stderr: '' };
+    },
+  }));
+  const scope = { project_id: 'demo', session_id: 'CTX-1' };
+  const log = await backend.callTool({ name: 'project_git_history', arguments: { ...scope, mode: 'log', entries: 5, path: 'docs/note.md' } });
+  assert.ok(!log.isError, log.content[0].text);
+  assert.deepEqual(backendCalls.at(-1).argv, ['git', 'log', '-n', '5', '--', 'docs/note.md']);
+  assert.ok(backendCalls.at(-1).args.includes('--timeout=20'));
+  await backend.callTool({ name: 'project_git_history', arguments: { ...scope, mode: 'diff', ref: 'HEAD~1' } });
+  assert.deepEqual(backendCalls.at(-1).argv, ['git', 'diff', 'HEAD~1']);
+  await backend.callTool({ name: 'project_git_history', arguments: { ...scope, mode: 'show', ref: 'HEAD' } });
+  assert.deepEqual(backendCalls.at(-1).argv, ['git', 'show', 'HEAD']);
+  // A large capture can be raised explicitly, and stays bounded.
+  await backend.callTool({ name: 'project_git_history', arguments: { ...scope, mode: 'diff', max_bytes: 1_048_576 } });
+  assert.ok(backendCalls.at(-1).args.includes('--max-bytes=1048576'));
+  const oversized = await backend.callTool({ name: 'project_git_history', arguments: { ...scope, mode: 'diff', max_bytes: 4_194_304 } });
+  assert.equal(oversized.isError, true);
+  // The request file never survives the call.
+  assert.deepEqual(await readdir(path.join(projectRoot, 'build/docs/mcp/argv')), []);
+
+  // Refusals happen before any backend process starts.
+  const before = backendCalls.length;
+  for (const [label, args] of [
+    ['a revision range', { mode: 'log', ref: 'main..HEAD' }],
+    ['a flag as a ref', { mode: 'show', ref: '--help' }],
+    ['a path outside the project', { mode: 'diff', path: '../outside' }],
+    ['entries on diff', { mode: 'diff', entries: 3 }],
+    ['an unknown mode', { mode: 'blame' }],
+  ]) {
+    const refused = await backend.callTool({ name: 'project_git_history', arguments: { ...scope, ...args } });
+    assert.equal(refused.isError, true, `${label} was not refused`);
+  }
+  assert.equal(backendCalls.length, before, 'a refused request must not start a backend process');
+
+  // generic: the same template plus the safety switches a direct Git call needs.
+  const gitCalls = [];
+  const generic = await connect(t, createProjectServer(new Map([['plain', { id: 'plain', root: projectRoot, adapter: 'generic' }]]), {
+    stateDirectory: path.join(root, 'state'),
+    runner: async (executable, args) => { gitCalls.push({ executable, args }); return { stdout: 'commit abc\n', stderr: '' }; },
+  }));
+  const began = JSON.parse((await generic.callTool({ name: 'project_begin', arguments: { project_id: 'plain' } })).content[0].text);
+  const genericLog = await generic.callTool({ name: 'project_git_history', arguments: { project_id: 'plain', session_id: began.backend.session_id, mode: 'log', entries: 2 } });
+  assert.ok(!genericLog.isError, genericLog.content[0].text);
+  assert.equal(gitCalls.at(-1).executable, 'git');
+  assert.ok(gitCalls.at(-1).args.includes('--no-ext-diff') && gitCalls.at(-1).args.includes('--no-textconv'), 'the direct call must disable external diff drivers');
+  assert.ok(gitCalls.at(-1).args.includes('-n') && gitCalls.at(-1).args.includes('2'));
+  assert.match(JSON.parse(genericLog.content[0].text).backend.content, /commit abc/);
 });
 
 test('knowledge MCP serves rules, maintains links/index/log and preserves raw source', async t => {

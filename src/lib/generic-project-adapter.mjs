@@ -5,6 +5,7 @@ import { mkdir, lstat, realpath, opendir, readFile, writeFile, rename, rmdir, op
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { relativePath, containedPath, inside } from './project-paths.mjs';
+import { gitHistoryCommand } from './git-history.mjs';
 
 const execute = promisify(execFile);
 const DEFAULT_STATE = fileURLToPath(new URL('../../data/project-sessions/', import.meta.url));
@@ -22,7 +23,7 @@ const now = () => new Date().toISOString();
 
 export const genericCapabilities = Object.freeze({
   backend: 'generic', selectors: ['path', 'start_line', 'end_line', 'start_column', 'offset', 'snapshot_id', 'expected_hash'],
-  operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status'],
+  operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'git-history'],
   search: 'case-insensitive literal search over permitted UTF-8 text; docs searches source and docs, wiki searches wiki/ and docs/wiki/',
   unsupported_selectors: ['id', 'section', 'pointer', 'force', 'command_index', 'stream', 'include_stale', 'include_views'],
   session_storage: 'service data/project-sessions or PROJECT_WIKI_STATE; project sources stay unchanged',
@@ -259,7 +260,20 @@ export class GenericProjectAdapter {
         return { status: 'passed', snapshot_id: snapshotId, source: state.snapshots[snapshotId].source, content: stdout, start_offset: 0, range_end: stdout.length, freshness: 'Fresh command output; not an atomic project snapshot and not a test result.' };
       } catch (error) { throw new Error(`Git status unavailable (${error.code ?? error.name}); the directory may not be a Git repository.`); }
     }
-    throw new Error(`Unsupported operation for the generic adapter: ${operation}. Supported: begin, search, read, evidence, status, adjust-budget, git-status. help, workset and recall come from a project that ships tools/docs/context_session.py.`);
+    if (operation === 'git-history') {
+      // A direct call must neutralize external diff drivers and textconv filters itself, because no
+      // backend rewrites this argv; .gitattributes must never decide to run a program here.
+      const argv = gitHistoryCommand(input);
+      try {
+        const { stdout } = await this.runner('git', argv, {
+          cwd: project.root, shell: false, windowsHide: true, timeout: (input.timeout_seconds ?? 20) * 1000, maxBuffer: 512 * 1024, encoding: 'utf8', signal,
+          env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GIT_'))), GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
+        });
+        const snapshotId = this.#snapshot(state, { kind: 'git-history', text: stdout, source: { path: `git:${input.mode}`, sha256: hash(stdout), read_at: now() } });
+        return { status: 'passed', mode: input.mode, ref: input.ref ?? null, snapshot_id: snapshotId, source: state.snapshots[snapshotId].source, content: stdout, start_offset: 0, range_end: stdout.length, freshness: 'Fresh command output for one fixed read-only Git subcommand; history is not a verification result.' };
+      } catch (error) { throw new Error(`Git ${input.mode} unavailable (${error.code ?? error.name}); check the ref, the path and that this directory is a Git repository.`); }
+    }
+    throw new Error(`Unsupported operation for the generic adapter: ${operation}. Supported: begin, search, read, evidence, status, adjust-budget, git-status, git-history. help, workset and recall come from a project that ships tools/docs/context_session.py.`);
   }
 
   async #read(project, operation, input, state) {

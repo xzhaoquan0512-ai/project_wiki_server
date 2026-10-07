@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { GenericProjectAdapter, genericCapabilities } from './generic-project-adapter.mjs';
 import { relativePath, containedPath } from './project-paths.mjs';
+import { gitHistoryArgv } from './git-history.mjs';
 export { relativePath, containedPath } from './project-paths.mjs';
 
 const execute = promisify(execFile);
@@ -52,7 +53,7 @@ export class ProjectAdapter {
   capabilities(project) {
     return project.adapter === 'generic' ? genericCapabilities : {
       backend: 'context_session.py', selectors: ['path', 'id', 'section', 'pointer', 'lines', 'command_index', 'stream'],
-      operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'help', 'workset', 'recall'],
+      operations: ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'git-history', 'help', 'workset', 'recall'],
       search: 'kind docs|wiki exactly as the backend defines them; the service forwards no selector the backend CLI does not accept, so source-code coverage follows the backend index rather than this service',
       session_storage: 'project backend query cache', freshness: 'preserves backend freshness and confidence',
     };
@@ -66,7 +67,7 @@ export class ProjectAdapter {
 
   async call(operation, input, signal) {
     const project = this.project(input.project_id);
-    const allowed = ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'help', 'workset', 'recall'];
+    const allowed = ['begin', 'search', 'read', 'evidence', 'status', 'adjust-budget', 'git-status', 'git-history', 'help', 'workset', 'recall'];
     if (!allowed.includes(operation)) throw new Error('Unsupported operation.');
     if (operation === 'git-status' && input.timeout_seconds !== undefined &&
         (!Number.isInteger(input.timeout_seconds) || input.timeout_seconds < 1 || input.timeout_seconds > 120)) {
@@ -82,13 +83,26 @@ export class ProjectAdapter {
     finally { if (this.#queues.get(key) === current) this.#queues.delete(key); }
   }
 
+  // One request file per call: unique so parallel MCP processes cannot read each other's argv,
+  // and removed by the caller as soon as the backend has read it.
+  async #requestFile(project, name, argv) {
+    const base = await containedPath(project.root, `build/docs/mcp/argv/${name}.json`, true);
+    await mkdir(path.dirname(base), { recursive: true });
+    await containedPath(project.root, `build/docs/mcp/argv/${name}.json`, true);
+    const unique = base.replace(/\.json$/, `-${process.pid}-${randomUUID()}.json`);
+    await writeFile(unique, JSON.stringify(argv) + '\n', { flag: 'wx' });
+    return unique;
+  }
+
   async #run(project, operation, input, signal) {
     if (signal?.aborted) throw new Error('Request cancelled.');
     if (project.adapter === 'generic') return this.generic.call(project, operation, input, signal);
     if (input.snapshot_id !== undefined || input.expected_hash !== undefined) {
       throw new Error('snapshot_id and expected_hash are supported only by the generic adapter.');
     }
-    const args = [project.script, operation === 'git-status' ? 'run' : operation, `--root=${project.root}`];
+    // Both Git tools hand the backend one fixed argv file and drive its `run` subcommand.
+    const gitOperation = operation === 'git-status' || operation === 'git-history';
+    const args = [project.script, gitOperation ? 'run' : operation, `--root=${project.root}`];
     // A per-call request file handed to the backend; it is removed once the call is over.
     let disposable = '';
     if (operation !== 'begin') option(args, 'session', input.session_id);
@@ -99,20 +113,24 @@ export class ProjectAdapter {
     } else if (operation === 'adjust-budget') {
       option(args, 'budget', input.budget);
       option(args, 'reason', input.reason);
-    } else if (operation === 'git-status') {
-      const argvPath = await containedPath(project.root, 'build/docs/mcp/argv/git-status.json', true);
-      await mkdir(path.dirname(argvPath), { recursive: true });
-      await containedPath(project.root, 'build/docs/mcp/argv/git-status.json', true);
-      const argv = ['git', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal'];
+    } else if (gitOperation) {
+      let argv;
+      if (operation === 'git-status') argv = ['git', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal'];
+      else {
+        // The path may name a file that no longer exists in the work tree but still has history,
+        // so containment is verified against the nearest existing ancestor.
+        if (input.path !== undefined) await containedPath(project.root, input.path, true);
+        argv = gitHistoryArgv(input);
+      }
       // Use a unique file per call so separate MCP processes cannot race its contents. The
       // backend copies the argv into its own capture directory, so the request file itself is
       // removed after the call instead of accumulating one file per query in the project.
-      const uniquePath = argvPath.replace(/\.json$/, `-${process.pid}-${randomUUID()}.json`);
-      await writeFile(uniquePath, JSON.stringify(argv) + '\n', { flag: 'wx' });
-      disposable = uniquePath;
-      option(args, 'argv-file', path.relative(project.root, uniquePath).replaceAll('\\', '/'));
+      disposable = await this.#requestFile(project, operation === 'git-status' ? 'git-status' : 'git-history', argv);
+      option(args, 'argv-file', path.relative(project.root, disposable).replaceAll('\\', '/'));
       option(args, 'timeout', input.timeout_seconds ?? 20);
-      option(args, 'max-bytes', 262144);
+      // A repository-wide diff can exceed the default capture size; the backend then reports
+      // capture_status output_limit instead of truncating silently, and the caller may raise it.
+      option(args, 'max-bytes', operation === 'git-history' ? (input.max_bytes ?? 262144) : 262144);
     } else if (operation === 'help') {
       option(args, 'command', input.command);
       option(args, 'offset', input.offset);
@@ -169,7 +187,7 @@ export class ProjectAdapter {
         ({ stdout, stderr } = await this.runner(project.python, args, {
           cwd: project.root, shell: false, windowsHide: true,
           // Leave time for the backend to save its timeout receipt and captured streams.
-          timeout: operation === 'git-status' ? ((input.timeout_seconds ?? 20) + 10) * 1000 : 30000,
+          timeout: gitOperation ? ((input.timeout_seconds ?? 20) + 10) * 1000 : 30000,
           maxBuffer: 2 * 1024 * 1024, encoding: 'utf8', signal,
           env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', GIT_OPTIONAL_LOCKS: '0' },
         }));

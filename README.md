@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml/badge.svg)](https://github.com/xzhaoquan0512-ai/project_wiki_server/actions/workflows/ci.yml)
 
-独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **25 个工具**，工程服务提供 **11 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
+独立的知识与工程上下文 MCP 服务，当前版本 **0.3.0**。知识服务提供 **25 个工具**，工程服务提供 **12 个工具**。服务代码、知识资料与工程配置分别管理；通用部署包提供空库模板和空工程列表，真实运行数据单独保存。
 
 ## 快速开始
 
@@ -213,7 +213,7 @@ ssh -N -L 8790:127.0.0.1:8790 <user>@<host>
 
 `deploy/ssh/start-panel.sh` 与 MCP 启动脚本同样读取 `PROJECT_WIKI_NODE`、`PROJECT_WIKI_VAULT`、`PROJECT_WIKI_PANEL_HOST`、`PROJECT_WIKI_PANEL_PORT`，默认 `127.0.0.1:8790`；只有显式设置 `PROJECT_WIKI_PANEL_ALLOW_REMOTE=1` 才会绑定非回环地址，模板 unit 不设置它。面板与 MCP 进程各自独立，互不依赖。
 
-## 工程工具：11 个
+## 工程工具：12 个
 
 | 工具 | 用途 |
 | --- | --- |
@@ -223,11 +223,16 @@ ssh -N -L 8790:127.0.0.1:8790 <user>@<host>
 | `project_read` | 按该适配器支持的路径、行或其他定位方式读取 |
 | `project_evidence` | 读取已有验证报告，保留其历史证据性质 |
 | `project_git_status` | 固定参数读取 Git 分支、提交和工作区变化 |
+| `project_git_history` | 固定模板读取 Git 历史：`diff`（可选一个 ref）、`log`（`entries` 限条数）、`show`（一个 ref，默认 HEAD） |
 | `project_session_status` | 查看会话用量及继续查询的信息 |
 | `project_adjust_budget` | 带原因调整原会话预算，保留累计用量 |
 | `project_help` | 在会话内读取后端自己的子命令帮助（有界、计控制输出） |
 | `project_workset` | 按**工程内** JSON spec 让后端组装工作集；服务只校验路径不越界，不读取或解释 spec |
 | `project_recall` | 按本次会话返回过的回执编号（`OBS-段-序号`）重读该次观察 |
+
+`project_git_history` 只接受一个 `mode`、**至多一个** revision（`HEAD`、`HEAD~2`、`main` 这类，不接受区间与任何 flag）和至多一个工程内路径，服务自己拼出固定 argv：不会出现第二个命令、`-c` 覆盖或外部差异程序。`context_session` 把 argv 交给后端执行（后端另行注入 `--no-ext-diff --no-textconv`、禁用 pager 与签名显示）；`generic` 直接调用 Git，同样带上这些安全开关并清空 `GIT_*` 环境——`.gitattributes` 里的 textconv 过滤器不会因此获得执行机会。Git 历史只说明改动过程，不是验证结论。
+
+输出按 `max_bytes`（默认 256 KiB，可设 64 KiB–1 MiB）截断，**截断是显式的**：后端返回 `capture_status: "output_limit"`、`complete: false` 并保存完整捕获到 `manifest_path`，调用方可用 `ref`/`path` 收窄请求，或用 `project_read` 按行续读该捕获，而不是把截断内容当成完整 diff。
 
 `project_help`、`project_workset`、`project_recall` 只存在于 `context_session` 适配器：它们驱动目标工程后端自己的 `help`/`workset`/`recall` 子命令，`project_list.capabilities.operations` 会列出实际支持的操作，普通 `generic` 工程会明确拒绝。回执重读不等于重新验证——它取回的是当时记录的观察，而不是当前事实。
 
