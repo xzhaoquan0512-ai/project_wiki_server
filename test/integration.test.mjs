@@ -179,9 +179,19 @@ test('MCP Git timeouts are bounded and reach both adapters without killing backe
 test('project MCP discovers only scoped query tools and refuses invalid file selectors', async t => {
   const root = await fixture(t);
   const client = await connect(t, createProjectServer(new Map([['project', { id: 'project', root, script: 'unused.py', python: 'unused' }]])));
-  const names = (await client.listTools()).tools.map(tool => tool.name);
+  const tools = (await client.listTools()).tools;
+  const names = tools.map(tool => tool.name);
   assert.equal(names.length, 8);
   assert.ok(!names.some(name => /write|shell|execute/.test(name)));
+  // Every tool states its behaviour, and the two calls that create or resize a session are not
+  // advertised as reads; the query tools are, the same way knowledge reads are annotated.
+  const readOnly = new Set(['project_list', 'project_search', 'project_read', 'project_evidence', 'project_git_status', 'project_session_status']);
+  for (const tool of tools) {
+    assert.ok(tool.annotations, `${tool.name} has no annotations`);
+    assert.equal(tool.annotations.readOnlyHint, readOnly.has(tool.name), `${tool.name} readOnlyHint`);
+    assert.equal(tool.annotations.destructiveHint, false, `${tool.name} destructiveHint`);
+    assert.equal(tool.annotations.openWorldHint, false, `${tool.name} openWorldHint`);
+  }
   const invalid = await client.callTool({ name: 'project_read', arguments: { project_id: 'project', session_id: 'CTX-test', path: '../outside' } });
   assert.equal(invalid.isError, true);
   const ambiguous = await client.callTool({ name: 'project_read', arguments: { project_id: 'project', session_id: 'CTX-test', path: 'x', id: 'DOC-1' } });

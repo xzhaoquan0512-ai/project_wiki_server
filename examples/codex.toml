@@ -23,7 +23,9 @@ tool_timeout_sec = 180
 command = "node"
 args = ["/absolute/path/project_wiki_server/bin/project-wiki-server.mjs", "project"]
 startup_timeout_sec = 30
-tool_timeout_sec = 60
+# Must exceed project_git_status timeout_seconds (up to 120) plus the 10 seconds the service
+# reserves to save the backend's timeout receipt. A smaller value cuts the call off first.
+tool_timeout_sec = 180
 # Optional: keep generic query sessions outside every registered project root.
 # env = { PROJECT_WIKI_STATE = "/absolute/path/to/project-sessions" }
 

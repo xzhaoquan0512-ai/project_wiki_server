@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, realpath, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, realpath, readdir, rm } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -91,4 +91,14 @@ test('CLI project command reports an unreadable registry instead of starting a s
   const result = await cli(['project', config], blank('PROJECT_WIKI_CONFIG'));
   assert.notEqual(result.code, 0);
   assert.notEqual(result.stderr.trim(), '');
+});
+
+test('the shipped client template outlasts the longest wait the project tool grants', async () => {
+  const template = await readFile(fileURLToPath(new URL('../examples/codex.toml', import.meta.url)), 'utf8');
+  const section = name => template.split(/^\[/m).find(part => part.startsWith(`mcp_servers.${name}]`)) ?? '';
+  const timeout = part => Number(/tool_timeout_sec\s*=\s*(\d+)/.exec(part)?.[1]);
+  // project_git_status accepts timeout_seconds up to 120 and the service reserves 10 more seconds
+  // to persist the backend's timeout receipt; a shorter client timeout would cut the call off.
+  assert.ok(timeout(section('project')) >= 130, 'the project client timeout is shorter than the Git wait it can request');
+  assert.ok(timeout(section('knowledge')) >= 130, 'the knowledge client timeout is too short for one extraction');
 });

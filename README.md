@@ -259,7 +259,7 @@ Windows 路径可写为 `D:/Code/my-project`。`adapter` 有三个选项：
 
 `project_evidence` 的文件类型也由适配器决定：`generic` 可读取普通 UTF-8 报告，`context_session` 使用后端支持的正式 RUN/EVD 记录。普通 JSON 报告使用 `project_read`，用 `pointer` 定位所需值。读取成功只证明取得了历史证据，不代表重跑了报告中的检查。
 
-`project_git_status` 默认等待 Git 最多 20 秒。WSL 挂载盘或较大工程可传 `timeout_seconds`（整数，1–120）延长等待；`context_session` 外层进程额外留 10 秒保存回执。客户端的请求超时也应大于这段时间。超时仍返回失败，不能当成工作区干净或查询成功。
+`project_git_status` 默认等待 Git 最多 20 秒。WSL 挂载盘或较大工程可传 `timeout_seconds`（整数，1–120）延长等待；`context_session` 外层进程额外留 10 秒保存回执。**客户端的请求超时必须大于 `timeout_seconds + 10` 秒**，否则调用会先被客户端中断：随附模板 [examples/codex.toml](examples/codex.toml) 因此把工程客户端设为 `tool_timeout_sec = 180`（原来的 60 秒在请求 120 秒时必然被截断）。超时仍返回失败，不能当成工作区干净或查询成功。
 
 `context_session` 的 `project_git_status` 把固定的只读命令 `git status --porcelain=v2 --branch --untracked-files=normal` 写成工程内 `build/docs/mcp/argv/` 下的请求文件交给后端。该文件按调用唯一命名，避免多个 MCP 进程互相覆盖，并在调用结束（含超时、失败）后由服务删除，不留下每次查询的遗留文件；后端会把实际 argv 复制进自己的 capture 目录。
 
